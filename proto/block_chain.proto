@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package proto;
+import "proto/common.proto";
+
+message WhisperResponse{
+	
+	string status = 1; // success,failure
+	string error = 2 ; // error message incase of failure 
+	
+}
+
+service BlockChainService {
+	rpc WisperAuditRequest ( FileAuditRequest ) returns ( WhisperResponse );
+} 
