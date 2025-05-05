@@ -13,7 +13,7 @@ from enum import Enum
 
 
 
-
+'''
 class AccessType(Enum):
     READ = 1,
     UPDATE = 2,
@@ -44,35 +44,34 @@ class FileAudits :
         
     
 auditsByFileId = {}
-auditsByFileId[123] = FileAudits()
+auditsByFileId[0] = FileAudits()
 
+'''
 
-
-
-async def run():
-   
+async def push_audit(audit_info):
+    
     async with grpc.aio.insecure_channel('[::]:50051') as channel:
         
-        
         stub = file_audit_pb2_grpc.FileAuditServiceStub(channel)
-        
-        audit_id = auditsByFileId[123].get_next_id()
-        audit_info = common_pb2.AuditInfo(audit_id=str(audit_id) ,user_id="999", access_type=common_pb2.AccessType.READ)
-        response_header = {} 
-        FileAuditRequest = common_pb2.FileAuditRequest(audit_info=audit_info,file_id="123")
-        id_response_pair = (audit_id, response_header)
-        auditsByFileId[123].add_audits(id_response_pair)
-        
+        FileAuditRequest = common_pb2.FileAuditRequest(audit_info=audit_info,file_id="0")
         response = await stub.SubmitAudit(FileAuditRequest)
-        
         merkle_proof = response.merkle_proof
         merkle_root = response.merkle_root
         
         print("File audit Mekle  Proof:", merkle_proof)
         print("File audit Mekle  Root:", merkle_root)
         print("File audit audit index",response.audit_index)
-        
         print("Is valid", MerkleTree.verify_merkle_proof(str(audit_info),response.audit_index,merkle_proof,merkle_root))
+
+
+
+async def run():
+   
+        audit_info1 = common_pb2.AuditInfo(audit_id=str(0) ,user_id="999", access_type=common_pb2.AccessType.READ)
+        audit_info2 = common_pb2.AuditInfo(audit_id=str(1) ,user_id="996", access_type=common_pb2.AccessType.READ)
+        audit_info3 = common_pb2.AuditInfo(audit_id=str(2) ,user_id="997", access_type=common_pb2.AccessType.READ)
+        await asyncio.gather(push_audit(audit_info1),push_audit(audit_info2),push_audit(audit_info3))
+
 
 if __name__ == '__main__':
     # Run the client code asynchronously
