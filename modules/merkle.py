@@ -18,7 +18,8 @@ class MerkleTree :
         
         return proof    
     
-    def verify_merkle_proof(self,audit,index,proof):
+    @staticmethod
+    def verify_merkle_proof(audit,index,proof, root):
         
         current_hash = MerkleTree.sha256(audit)
         
@@ -30,7 +31,7 @@ class MerkleTree :
             
             index = index // 2
         
-        return current_hash == self.root         
+        return current_hash == root         
         
       
 

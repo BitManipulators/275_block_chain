@@ -17,7 +17,7 @@ from proto import block_chain_pb2_grpc
 from modules.block import Block 
 from modules.merkle import MerkleTree 
 
-BLOCK_SIZE = 2
+BLOCK_SIZE = 3
 
 class ServerProperties () :
     def __init__(self,args):
@@ -25,7 +25,14 @@ class ServerProperties () :
         self.port = args.port
         self.isvalidator = args.isvalidator
         self.blocks = [Block.create_genesis_block()]
-            
+        self.audit_details_byfile = {}
+        
+
+class AuditDetails ():
+    def __init__(self, audit_id , block_id, block_index ):
+        self.audit_id = audit_id
+        self.block_id = block_id
+        self.block_index =  block_index       
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
 
@@ -62,30 +69,48 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
                 
                 print("Queue has reached BLOCK_SIZE, processing the queue ...")
                 
-                audits = []
-                req_list = []
+                same_block_audits = []
+                request_and_future_list = []
                 
                 for _ in range(BLOCK_SIZE):
-                    req =  await server_properties.request_queue.get()
-                    req_list.append(req)
-                    file_info = str(req[0].file_info)
-                    audits.append(file_info)
+                    req_and_future =  await server_properties.request_queue.get()
+                    request_and_future_list.append(req_and_future)
+                    request = req_and_future[0]
+                    audit_info = str(request.audit_info)
+                    same_block_audits.append(audit_info)
 
-                merkle_tree = MerkleTree(audits)
                 
+                merkle_tree = MerkleTree(same_block_audits)
                 last_block = server_properties.blocks[-1]
                 new_block = Block(index = last_block.index+1,
                           previous_hash=last_block.hash,
-                         audits=audits,merkle_root=merkle_tree.root)
+                         audits=same_block_audits,merkle_root=merkle_tree.root)
         
                 server_properties.blocks.append(new_block)
                 
-                block_header = file_audit_pb2.BlockHeader(previous_block_hash=new_block.previous_hash,
-                                                          merkle_root=new_block.merkle_root)
-                
-                for req,future  in req_list :
-                    future.set_result(file_audit_pb2.FileAuditResponse(block_header=block_header, status="success"))
+                index = 0
+                for request,future  in request_and_future_list :
+                    
+                    file_id = request.file_id
+                    audit_details = AuditDetails(request.audit_info.audit_id, new_block.hash, index)
+                    
+                    if file_id in server_properties.audit_details_byfile :
+                        server_properties.audit_details_byfile[file_id].append(audit_details)
+                    else :
+                        server_properties.audit_details_byfile[file_id] = [audit_details]
+                        
+                    print(server_properties.audit_details_byfile[file_id])    
+                    response = file_audit_pb2.FileAuditResponse(merkle_proof = merkle_tree.get_merkle_proof(index), 
+                                                                       merkle_root = merkle_tree.root,
+                                                                       audit_index = index,
+                                                                       status="success")
+                    
+                    print(response)
+                    
+                    future.set_result(response)
+                    index +=1
 
+            
             print("Checking the queue...")
             await asyncio.sleep(3)        
 
@@ -105,14 +130,14 @@ async def serve(server_properties):
     
     server = grpc.aio.server() 
     
-    file_audit = FileAuditService(server_properties)
-    file_audit_pb2_grpc.add_FileAuditServiceServicer_to_server(file_audit, server)
+    file_audit_service = FileAuditService(server_properties)
+    file_audit_pb2_grpc.add_FileAuditServiceServicer_to_server(file_audit_service, server)
     block_chain_pb2_grpc.add_BlockChainServiceServicer_to_server(BlockChainService(server_properties),server)
     
     server.add_insecure_port('[::]:'+str(server_properties.port))
     print("Server started on port ", server_properties.port)
     
-    await asyncio.gather(server.start(),file_audit.process_queue())
+    await asyncio.gather(server.start(),file_audit_service.process_queue())
     await server.wait_for_termination()  
 
 if __name__ == '__main__':
