@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from proto import common_pb2 as proto_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16proto/file_audit.proto\x12\x05proto\x1a\x12proto/common.proto\"\xae\x01\n\x0b\x42lockHeader\x12\x12\n\nblock_hash\x18\x01 \x01(\t\x12\x14\n\x0c\x62lock_number\x18\x02 \x01(\x04\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x1b\n\x13previous_block_hash\x18\x04 \x01(\t\x12\x13\n\x0bmerkle_root\x18\x05 \x01(\t\x12\x14\n\x0cmerkle_proof\x18\x06 \x03(\t\x12\x1a\n\x12transaction_hashes\x18\x07 \x03(\t\"\x90\x01\n\x11\x46ileAuditResponse\x12\x0e\n\x06req_id\x18\x01 \x01(\t\x12\x1a\n\x12\x62lockchain_tx_hash\x18\x02 \x01(\t\x12(\n\x0c\x62lock_header\x18\x03 \x01(\x0b\x32\x12.proto.BlockHeader\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x15\n\rerror_message\x18\x05 \x01(\t2T\n\x10\x46ileAuditService\x12@\n\x0bSubmitAudit\x12\x17.proto.FileAuditRequest\x1a\x18.proto.FileAuditResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16proto/file_audit.proto\x12\x05proto\x1a\x12proto/common.proto\"\xae\x01\n\x0b\x42lockHeader\x12\x12\n\nblock_hash\x18\x01 \x01(\t\x12\x14\n\x0c\x62lock_number\x18\x02 \x01(\x04\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x1b\n\x13previous_block_hash\x18\x04 \x01(\t\x12\x13\n\x0bmerkle_root\x18\x05 \x01(\t\x12\x14\n\x0cmerkle_proof\x18\x06 \x03(\t\x12\x1a\n\x12transaction_hashes\x18\x07 \x03(\t\"z\n\x11\x46ileAuditResponse\x12\x13\n\x0bmerkle_root\x18\x01 \x01(\t\x12\x14\n\x0cmerkle_proof\x18\x02 \x03(\t\x12\x13\n\x0b\x61udit_index\x18\x03 \x01(\x03\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x15\n\rerror_message\x18\x05 \x01(\t2T\n\x10\x46ileAuditService\x12@\n\x0bSubmitAudit\x12\x17.proto.FileAuditRequest\x1a\x18.proto.FileAuditResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,8 +34,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_BLOCKHEADER']._serialized_start=54
   _globals['_BLOCKHEADER']._serialized_end=228
-  _globals['_FILEAUDITRESPONSE']._serialized_start=231
-  _globals['_FILEAUDITRESPONSE']._serialized_end=375
-  _globals['_FILEAUDITSERVICE']._serialized_start=377
-  _globals['_FILEAUDITSERVICE']._serialized_end=461
+  _globals['_FILEAUDITRESPONSE']._serialized_start=230
+  _globals['_FILEAUDITRESPONSE']._serialized_end=352
+  _globals['_FILEAUDITSERVICE']._serialized_start=354
+  _globals['_FILEAUDITSERVICE']._serialized_end=438
 # @@protoc_insertion_point(module_scope)

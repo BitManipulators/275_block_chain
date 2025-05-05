@@ -24,19 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12proto/common.proto\x12\x05proto\".\n\x08\x46ileInfo\x12\x0f\n\x07\x66ile_id\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\".\n\x08UserInfo\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x11\n\tuser_name\x18\x02 \x01(\t\"\xcc\x01\n\x10\x46ileAuditRequest\x12\x0e\n\x06req_id\x18\x01 \x01(\t\x12\"\n\tfile_info\x18\x02 \x01(\x0b\x32\x0f.proto.FileInfo\x12\"\n\tuser_info\x18\x03 \x01(\x0b\x32\x0f.proto.UserInfo\x12&\n\x0b\x61\x63\x63\x65ss_type\x18\x04 \x01(\x0e\x32\x11.proto.AccessType\x12\x11\n\ttimestamp\x18\x05 \x01(\x03\x12\x11\n\tsignature\x18\x06 \x01(\t\x12\x12\n\npublic_key\x18\x07 \x01(\t*F\n\nAccessType\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x08\n\x04READ\x10\x01\x12\t\n\x05WRITE\x10\x02\x12\n\n\x06UPDATE\x10\x03\x12\n\n\x06\x44\x45LETE\x10\x04\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12proto/common.proto\x12\x05proto\"V\n\tAuditInfo\x12\x10\n\x08\x61udit_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12&\n\x0b\x61\x63\x63\x65ss_type\x18\x03 \x01(\x0e\x32\x11.proto.AccessType\"p\n\x10\x46ileAuditRequest\x12\x0f\n\x07\x66ile_id\x18\x01 \x01(\t\x12$\n\naudit_info\x18\x02 \x01(\x0b\x32\x10.proto.AuditInfo\x12\x11\n\tsignature\x18\x03 \x01(\t\x12\x12\n\npublic_key\x18\x04 \x01(\t*F\n\nAccessType\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x08\n\x04READ\x10\x01\x12\t\n\x05WRITE\x10\x02\x12\n\n\x06UPDATE\x10\x03\x12\n\n\x06\x44\x45LETE\x10\x04\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'proto.common_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_ACCESSTYPE']._serialized_start=332
-  _globals['_ACCESSTYPE']._serialized_end=402
-  _globals['_FILEINFO']._serialized_start=29
-  _globals['_FILEINFO']._serialized_end=75
-  _globals['_USERINFO']._serialized_start=77
-  _globals['_USERINFO']._serialized_end=123
-  _globals['_FILEAUDITREQUEST']._serialized_start=126
-  _globals['_FILEAUDITREQUEST']._serialized_end=330
+  _globals['_ACCESSTYPE']._serialized_start=231
+  _globals['_ACCESSTYPE']._serialized_end=301
+  _globals['_AUDITINFO']._serialized_start=29
+  _globals['_AUDITINFO']._serialized_end=115
+  _globals['_FILEAUDITREQUEST']._serialized_start=117
+  _globals['_FILEAUDITREQUEST']._serialized_end=229
 # @@protoc_insertion_point(module_scope)

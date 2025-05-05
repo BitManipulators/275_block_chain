@@ -19,9 +19,9 @@ message BlockHeader {
 
 message FileAuditResponse {
 	
-	string req_id = 1 ;                // incase of async
-	string blockchain_tx_hash = 2 ;
-	BlockHeader block_header = 3 ;
+	string merkle_root = 1;
+	repeated string merkle_proof = 2 ;
+	int64 audit_index = 3 ;
 	string status = 4 ;  // success, failure
 	string error_message = 5; // If its failure
 
