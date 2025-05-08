@@ -45,9 +45,9 @@ auditsByFileId[0] = FileAudits()
 
 '''
 
-async def push_audit(audit_info):
+async def push_audit(audit_info,ip):
     
-    async with grpc.aio.insecure_channel('[::]:50051') as channel:
+    async with grpc.aio.insecure_channel(ip) as channel:
         
         stub = file_audit_pb2_grpc.FileAuditServiceStub(channel)
         FileAuditRequest = common_pb2.FileAuditRequest(audit_info=audit_info,file_id="0")
@@ -67,7 +67,7 @@ async def run():
         audit_info1 = common_pb2.AuditInfo(audit_id=str(0) ,user_id="999", access_type=common_pb2.AccessType.READ)
         audit_info2 = common_pb2.AuditInfo(audit_id=str(1) ,user_id="996", access_type=common_pb2.AccessType.READ)
         audit_info3 = common_pb2.AuditInfo(audit_id=str(2) ,user_id="997", access_type=common_pb2.AccessType.READ)
-        await asyncio.gather(push_audit(audit_info1),push_audit(audit_info2),push_audit(audit_info3))
+        await asyncio.gather(push_audit(audit_info1,"[::]:50051"),push_audit(audit_info2,"[::]:50051"),push_audit(audit_info3,"[::]:50051"))
 
 
 if __name__ == '__main__':

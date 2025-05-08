@@ -127,10 +127,15 @@ class FullNode () :
                 
                 try :
                     
-                    neighbors = ['[::]:50052','[::]:50053']
-                    for neighbor in neighbors :
+                    neighbors_ports = ['50052','50053']
+                    for neighbor_port in neighbors_ports :
+                
+                        if neighbor_port == full_node.port :
+                            continue
+                
+                        neighbor_ip = "[::]:" + neighbor_port
                         file_audit_requests = [request for request,_ in request_and_future_list ] 
-                        asyncio.create_task(self.propose_block(new_block,file_audit_requests,neighbor))
+                        asyncio.create_task(self.propose_block(new_block,file_audit_requests,neighbor_ip))
                 
                 except Exception as e : 
                     print(f"An error occured{e}")
@@ -140,12 +145,15 @@ class FullNode () :
                 
                 index = 0
                 for request,future  in request_and_future_list :
-                    file_id = request.file_id
-                    audit_id = request.audit_info.audit_id
-                    block_hash = new_block.hash
                     
-                    # persist the every audit's block information - 
-                    self.store_file_audits(file_id,audit_id,block_hash)
+                    
+                    # persist the every audit's block information -
+                    # file_id = request.file_id
+                    # audit_id = request.audit_info.audit_id
+                    # block_hash = new_block.hash
+                     
+                    #self.store_file_audits(file_id,audit_id,block_hash)
+                    
                     response = file_audit_pb2.FileAuditResponse(status="success",
                                                                 merkle_proof = merkle_tree.get_merkle_proof(index), 
                                                                 merkle_root = merkle_tree.root,
@@ -197,9 +205,15 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
         
         #whisper it to the neighbor
         try :
-            neighbors = ['[::]:50052','[::]:50053']
-            for neighbor in neighbors :
-                asyncio.create_task(full_node.whisper_audits(request,neighbor))
+            
+            neighbors_ports = ['50052','50053']
+            for neighbor_port in neighbors_ports :
+                
+                if neighbor_port == full_node.port :
+                    continue
+                
+                neighbor_ip = "[::]:" + neighbor_port
+                asyncio.create_task(full_node.whisper_audits(request,neighbor_ip))
         
         except Exception as e :
             print(f"An error occured{e}")
@@ -296,7 +310,7 @@ async def serve(full_node):
     print("Server started on port ", full_node.port)
     
     if full_node.isvalidator :
-        await asyncio.gather(server.start(),full_node.process_queue())
+        await asyncio.gather(full_node.process_queue(),server.start())
     else :
         await asyncio.gather(full_node.get_genesis_block(),server.start())    
     
