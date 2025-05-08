@@ -3,6 +3,7 @@
 import grpc
 import warnings
 
+from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from proto import block_chain_pb2 as proto_dot_block__chain__pb2
 from proto import common_pb2 as proto_dot_common__pb2
 
@@ -35,28 +36,39 @@ class BlockChainServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.WisperAuditRequest = channel.unary_unary(
-                '/proto.BlockChainService/WisperAuditRequest',
+        self.wisperAuditRequest = channel.unary_unary(
+                '/proto.BlockChainService/wisperAuditRequest',
                 request_serializer=proto_dot_common__pb2.FileAuditRequest.SerializeToString,
                 response_deserializer=proto_dot_block__chain__pb2.WhisperResponse.FromString,
                 _registered_method=True)
-        self.ProposeBlock = channel.unary_unary(
-                '/proto.BlockChainService/ProposeBlock',
+        self.proposeBlock = channel.unary_unary(
+                '/proto.BlockChainService/proposeBlock',
                 request_serializer=proto_dot_block__chain__pb2.Block.SerializeToString,
                 response_deserializer=proto_dot_block__chain__pb2.ProposeResponse.FromString,
+                _registered_method=True)
+        self.getGenesisBlock = channel.unary_unary(
+                '/proto.BlockChainService/getGenesisBlock',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=proto_dot_block__chain__pb2.Block.FromString,
                 _registered_method=True)
 
 
 class BlockChainServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def WisperAuditRequest(self, request, context):
+    def wisperAuditRequest(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ProposeBlock(self, request, context):
+    def proposeBlock(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def getGenesisBlock(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -65,15 +77,20 @@ class BlockChainServiceServicer(object):
 
 def add_BlockChainServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'WisperAuditRequest': grpc.unary_unary_rpc_method_handler(
-                    servicer.WisperAuditRequest,
+            'wisperAuditRequest': grpc.unary_unary_rpc_method_handler(
+                    servicer.wisperAuditRequest,
                     request_deserializer=proto_dot_common__pb2.FileAuditRequest.FromString,
                     response_serializer=proto_dot_block__chain__pb2.WhisperResponse.SerializeToString,
             ),
-            'ProposeBlock': grpc.unary_unary_rpc_method_handler(
-                    servicer.ProposeBlock,
+            'proposeBlock': grpc.unary_unary_rpc_method_handler(
+                    servicer.proposeBlock,
                     request_deserializer=proto_dot_block__chain__pb2.Block.FromString,
                     response_serializer=proto_dot_block__chain__pb2.ProposeResponse.SerializeToString,
+            ),
+            'getGenesisBlock': grpc.unary_unary_rpc_method_handler(
+                    servicer.getGenesisBlock,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=proto_dot_block__chain__pb2.Block.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -87,7 +104,7 @@ class BlockChainService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def WisperAuditRequest(request,
+    def wisperAuditRequest(request,
             target,
             options=(),
             channel_credentials=None,
@@ -100,7 +117,7 @@ class BlockChainService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/proto.BlockChainService/WisperAuditRequest',
+            '/proto.BlockChainService/wisperAuditRequest',
             proto_dot_common__pb2.FileAuditRequest.SerializeToString,
             proto_dot_block__chain__pb2.WhisperResponse.FromString,
             options,
@@ -114,7 +131,7 @@ class BlockChainService(object):
             _registered_method=True)
 
     @staticmethod
-    def ProposeBlock(request,
+    def proposeBlock(request,
             target,
             options=(),
             channel_credentials=None,
@@ -127,9 +144,36 @@ class BlockChainService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/proto.BlockChainService/ProposeBlock',
+            '/proto.BlockChainService/proposeBlock',
             proto_dot_block__chain__pb2.Block.SerializeToString,
             proto_dot_block__chain__pb2.ProposeResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def getGenesisBlock(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/proto.BlockChainService/getGenesisBlock',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            proto_dot_block__chain__pb2.Block.FromString,
             options,
             channel_credentials,
             insecure,
