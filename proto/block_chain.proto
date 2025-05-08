@@ -3,7 +3,7 @@ syntax = "proto3";
 package proto;
 
 import "proto/common.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
 
 message Block {
 	
@@ -30,7 +30,15 @@ message ProposeResponse{
 	
 }
 
+message GenesisResponse{
+	
+	string status = 1; // success,failure
+	string error = 2 ; // error message incase of failure 
+	
+}
+
 service BlockChainService {
-	rpc WisperAuditRequest ( FileAuditRequest ) returns ( WhisperResponse );
-	rpc ProposeBlock (Block) returns (ProposeResponse);
+	rpc wisperAuditRequest ( FileAuditRequest ) returns ( WhisperResponse );
+	rpc proposeBlock (Block) returns (ProposeResponse);
+	rpc getGenesisBlock (google.protobuf.Empty) returns (Block);
 } 
