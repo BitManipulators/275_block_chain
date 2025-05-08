@@ -40,12 +40,23 @@ class BlockChainServiceStub(object):
                 request_serializer=proto_dot_common__pb2.FileAuditRequest.SerializeToString,
                 response_deserializer=proto_dot_block__chain__pb2.WhisperResponse.FromString,
                 _registered_method=True)
+        self.ProposeBlock = channel.unary_unary(
+                '/proto.BlockChainService/ProposeBlock',
+                request_serializer=proto_dot_block__chain__pb2.Block.SerializeToString,
+                response_deserializer=proto_dot_block__chain__pb2.ProposeResponse.FromString,
+                _registered_method=True)
 
 
 class BlockChainServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def WisperAuditRequest(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ProposeBlock(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -58,6 +69,11 @@ def add_BlockChainServiceServicer_to_server(servicer, server):
                     servicer.WisperAuditRequest,
                     request_deserializer=proto_dot_common__pb2.FileAuditRequest.FromString,
                     response_serializer=proto_dot_block__chain__pb2.WhisperResponse.SerializeToString,
+            ),
+            'ProposeBlock': grpc.unary_unary_rpc_method_handler(
+                    servicer.ProposeBlock,
+                    request_deserializer=proto_dot_block__chain__pb2.Block.FromString,
+                    response_serializer=proto_dot_block__chain__pb2.ProposeResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -87,6 +103,33 @@ class BlockChainService(object):
             '/proto.BlockChainService/WisperAuditRequest',
             proto_dot_common__pb2.FileAuditRequest.SerializeToString,
             proto_dot_block__chain__pb2.WhisperResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ProposeBlock(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/proto.BlockChainService/ProposeBlock',
+            proto_dot_block__chain__pb2.Block.SerializeToString,
+            proto_dot_block__chain__pb2.ProposeResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -31,6 +31,7 @@ class AuditDetails ():
 class ServerProperties () :
     def __init__(self,args):
         self.request_queue = asyncio.Queue()
+        self.mem_pool = []
         self.port = args.port
         self.isvalidator = args.isvalidator
         self.blocks = [Block.create_genesis_block()]
@@ -55,7 +56,7 @@ class ServerProperties () :
         else :
             server_properties.audit_details_byfile[file_id] = [audit_details]
         
-        print(server_properties.audit_details_byfile[file_id]) 
+        #print(server_properties.audit_details_byfile[file_id]) 
         
         
 
@@ -66,28 +67,50 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
     def __init__(self,server_properties):
         self.server_properties = server_properties
     
-    '''    
-    async def whisper_audits(request):
+    
+    async def propose_block(self,block,fileaudit_requests):
         
         async with grpc.aio.insecure_channel('[::]:50052') as channel:
             stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
-            request = common_pb2.FileAuditRequest(req_id="123")
+            
+            grpc_block = block_chain_pb2.Block(index=block.index,
+                                  hash=block.hash,
+                                  previous_hash=block.previous_hash,
+                                  timestamp=block.timestamp,
+                                  merkle_root=block.merkle_root,
+                                  file_audit_requests = fileaudit_requests)
+            
+            response = await stub1.ProposeBlock(grpc_block)
+            print("Propose response received:", response)    
+    
+    async def whisper_audits(self,request):
+        
+        async with grpc.aio.insecure_channel('[::]:50052') as channel:
+            stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
             response = await stub1.WisperAuditRequest(request)
-            print("Whiseper response received:", response) '''
+            print("Whisper response received:", response) 
             
         
-    
     async def SubmitAudit(self, request, context):
         
         print("Got a new audit request")
         print(request)
+        
+        #whisper it to the neighbor
+        try :
+            asyncio.create_task(self.whisper_audits(request))
+        except Exception as e :
+            print(f"An error occured{e}")
+        
         future = asyncio.Future()
+        
+        self.server_properties.mem_pool.append(request)
         await server_properties.request_queue.put((request,future))
-        print(server_properties.request_queue.qsize())
+        
         result = await future
         return result
 
-    
+       
     async def process_queue(self):
        
         while True :
@@ -114,22 +137,34 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
                 # create new block in the chain
                 new_block = self.server_properties.create_block(same_block_audits,merkle_tree)
                 
-               
+                try :
+                    file_audit_requests = [request for request,_ in request_and_future_list ] 
+                    asyncio.create_task(self.propose_block(new_block,file_audit_requests))
+                except Exception as e : 
+                    print(f"An error occured{e}")
+                
+    
+                
                 
                 index = 0
                 for request,future  in request_and_future_list :
                     file_id = request.file_id
                     audit_id = request.audit_info.audit_id
                     block_hash = new_block.hash
-                     # persist the every audit's block information - 
+                    
+                    # persist the every audit's block information - 
                     self.server_properties.store_file_audits(file_id,audit_id,block_hash)
                     response = file_audit_pb2.FileAuditResponse(status="success",
                                                                 merkle_proof = merkle_tree.get_merkle_proof(index), 
                                                                 merkle_root = merkle_tree.root,
                                                                 audit_index = index)
+                    
+                    
+                    #Remove the processed request from mempool
+                    self.server_properties.mem_pool.remove(request)
                     future.set_result(response)
                     index +=1
-
+                    
             
             
             
@@ -142,10 +177,27 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
     def __init__(self,server_properties):
         self.server_properties = server_properties
     
-    '''
-    async def WisperAuditRequest(self,request,context) :
-        print(request)
-        return block_chain_pb2.WhisperResponse(status="success") '''
+    
+    async def WisperAuditRequest(self,audit_request,context) :
+        
+        print("Got a audit from the peer",audit_request)
+        self.server_properties.mem_pool.append(audit_request)
+        return block_chain_pb2.WhisperResponse(status="success")
+    
+    async def ProposeBlock(self, proposed_block_request, context):
+        
+        print("Got Block Proposal")
+        
+        file_audit_requests = proposed_block_request.file_audit_requests
+        
+        
+        # Remove from MemPool
+        for req in file_audit_requests :
+            self.server_properties.mem_pool.remove(req)
+        
+        
+        
+        return block_chain_pb2.ProposeResponse(status="success")
 
 
 async def serve(server_properties):
