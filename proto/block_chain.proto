@@ -13,6 +13,7 @@ message Block {
 	double timestamp = 4;
 	string merkle_root = 5;
 	repeated FileAuditRequest file_audit_requests = 6;
+	repeated string file_audits = 7;
 
 }
 

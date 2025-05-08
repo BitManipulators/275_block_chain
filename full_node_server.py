@@ -17,6 +17,8 @@ from proto import block_chain_pb2_grpc
 from modules.block import Block 
 from modules.merkle import MerkleTree 
 
+from google.protobuf import empty_pb2
+
 
 
 
@@ -48,6 +50,21 @@ class FullNode () :
         self.blocks.append(new_block)
         return new_block
     
+    def append_block(self, new_block):
+        
+        print("Block appended!!!")
+        self.blocks.append(new_block)
+        
+    def append_to_mem_pool(self,req):
+        
+        print("Request added to mem pool")
+        self.mem_pool.append(req)
+        
+    def remove_from_mem_pool(self, req):
+        print("Requets Removed from mempool")
+        self.mem_pool.remove(req)
+            
+    
     def store_file_audits(self,file_id, audit_id, block_id):
         
         audit_details = AuditDetails(audit_id, block_id)
@@ -67,7 +84,8 @@ class FullNode () :
                                   previous_hash=block.previous_hash,
                                   timestamp=block.timestamp,
                                   merkle_root=block.merkle_root,
-                                  file_audit_requests = fileaudit_requests)
+                                  file_audit_requests = fileaudit_requests,
+                                  file_audits = block.audits )
             
             response = await stub1.proposeBlock(grpc_block)
             print("Propose response received:", response)    
@@ -145,7 +163,25 @@ class FullNode () :
             print("Checking the queue...")
             await asyncio.sleep(3)
         
-
+    async def get_genesis_block(self):
+        
+        async with grpc.aio.insecure_channel('[::]:50051') as channel:
+            
+            stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+            genesis_block_response = await stub1.getGenesisBlock(empty_pb2.Empty())
+            print("Geneis Block  received!!")
+            
+            genesis_block = Block(index=genesis_block_response.index,
+                              previous_hash=genesis_block_response.previous_hash,
+                              audits = genesis_block_response.file_audits,
+                              timestamp = genesis_block_response.timestamp,
+                              merkle_root= genesis_block_response.merkle_root,
+                              hash = genesis_block_response.hash
+                              )
+            
+            self.append_block(genesis_block)
+            
+        
      
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
@@ -157,7 +193,7 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
     async def SubmitAudit(self, request, context):
         
         print("Got a new audit request")
-        print(request)
+        #print(request)
         
         #whisper it to the neighbor
         try :
@@ -170,7 +206,8 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
         
         future = asyncio.Future()
         
-        self.full_node.mem_pool.append(request)
+        
+        self.full_node.append_to_mem_pool(request)
         await full_node.request_queue.put((request,future))
         
         result = await future
@@ -187,27 +224,64 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
     
     async def wisperAuditRequest(self,audit_request,context) :
         
-        print("Got a audit from the peer",audit_request)
-        self.full_node.mem_pool.append(audit_request)
+        print("Got a audit from the peer")
+        self.full_node.append_to_mem_pool(audit_request)
         return block_chain_pb2.WhisperResponse(status="success")
     
     async def proposeBlock(self, proposed_block_request, context):
         
         print("Got Block Proposal")
-        print(proposed_block_request)
+        #print(proposed_block_request)
         
-        file_audit_requests = proposed_block_request.file_audit_requests
-        # Remove from MemPool
-        for req in file_audit_requests :
-            self.full_node.mem_pool.remove(req)
         
-        return block_chain_pb2.ProposeResponse(status="success")
+        #check for the last stored hash and prev hash from the request
+        if self.full_node.blocks[-1].hash == proposed_block_request.previous_hash :
+            print("Previous hash matches!!")
+            
+            file_audit_requests = proposed_block_request.file_audit_requests
+           
+            # Remove from MemPool
+            for req in file_audit_requests :
+                self.full_node.remove_from_mem_pool(req)
+                
+            
+            new_block = Block(index=proposed_block_request.index,
+                              previous_hash=proposed_block_request.previous_hash,
+                              audits=proposed_block_request.file_audits,
+                              timestamp = proposed_block_request.timestamp,
+                              merkle_root= proposed_block_request.merkle_root,
+                              hash = proposed_block_request.hash
+                              )
+            
+            self.full_node.append_block(new_block)
+            
+            return block_chain_pb2.ProposeResponse(status="success")
+            
+        else :
+            
+            
+            print("Hash Didnot match")
+            #print("file_audit_requests  -  ", proposed_block_request.previous_hash)
+            #print("Previous block",self.full_node.blocks[-1].hash)
+            
+            return block_chain_pb2.ProposeResponse(status="failure")
+         
+             
+        
+        
     
     async def getGenesisBlock(self, genesis_block_request, context):
         
         print("Got Genesis Block Request")
-        genesis_block = block_chain_pb2.Block(index=123)
-        return genesis_block
+        
+        genesis_block = self.full_node.blocks[0]
+        genesis_block_response = block_chain_pb2.Block(index=genesis_block.index,
+                                  hash=genesis_block.hash,
+                                  previous_hash=genesis_block.previous_hash,
+                                  timestamp=genesis_block.timestamp,
+                                  merkle_root=genesis_block.merkle_root,
+                                  )
+        return genesis_block_response
 
 
 async def serve(full_node):
@@ -224,7 +298,7 @@ async def serve(full_node):
     if full_node.isvalidator :
         await asyncio.gather(server.start(),full_node.process_queue())
     else :
-        await server.start()    
+        await asyncio.gather(full_node.get_genesis_block(),server.start())    
     
     await server.wait_for_termination()  
 
