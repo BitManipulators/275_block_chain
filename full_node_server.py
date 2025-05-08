@@ -68,9 +68,9 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
         self.server_properties = server_properties
     
     
-    async def propose_block(self,block,fileaudit_requests):
+    async def propose_block(self,block,fileaudit_requests,peer_address):
         
-        async with grpc.aio.insecure_channel('[::]:50052') as channel:
+        async with grpc.aio.insecure_channel(peer_address) as channel:
             stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
             
             grpc_block = block_chain_pb2.Block(index=block.index,
@@ -83,9 +83,9 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
             response = await stub1.ProposeBlock(grpc_block)
             print("Propose response received:", response)    
     
-    async def whisper_audits(self,request):
+    async def whisper_audits(self,request,peer_address):
         
-        async with grpc.aio.insecure_channel('[::]:50052') as channel:
+        async with grpc.aio.insecure_channel(peer_address) as channel:
             stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
             response = await stub1.WisperAuditRequest(request)
             print("Whisper response received:", response) 
@@ -98,7 +98,10 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
         
         #whisper it to the neighbor
         try :
-            asyncio.create_task(self.whisper_audits(request))
+            neighbors = ['[::]:50052','[::]:50053']
+            for neighbor in neighbors :
+                asyncio.create_task(self.whisper_audits(request,neighbor))
+        
         except Exception as e :
             print(f"An error occured{e}")
         
@@ -138,8 +141,12 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
                 new_block = self.server_properties.create_block(same_block_audits,merkle_tree)
                 
                 try :
-                    file_audit_requests = [request for request,_ in request_and_future_list ] 
-                    asyncio.create_task(self.propose_block(new_block,file_audit_requests))
+                    
+                    neighbors = ['[::]:50052','[::]:50053']
+                    for neighbor in neighbors :
+                        file_audit_requests = [request for request,_ in request_and_future_list ] 
+                        asyncio.create_task(self.propose_block(new_block,file_audit_requests,neighbor))
+                
                 except Exception as e : 
                     print(f"An error occured{e}")
                 
@@ -187,10 +194,9 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
     async def ProposeBlock(self, proposed_block_request, context):
         
         print("Got Block Proposal")
+        print(proposed_block_request)
         
         file_audit_requests = proposed_block_request.file_audit_requests
-        
-        
         # Remove from MemPool
         for req in file_audit_requests :
             self.server_properties.mem_pool.remove(req)
@@ -211,7 +217,11 @@ async def serve(server_properties):
     server.add_insecure_port('[::]:'+str(server_properties.port))
     print("Server started on port ", server_properties.port)
     
-    await asyncio.gather(server.start(),file_audit_service.process_queue())
+    if server_properties.isvalidator :
+        await asyncio.gather(server.start(),file_audit_service.process_queue())
+    else :
+        await server.start()    
+    
     await server.wait_for_termination()  
 
 if __name__ == '__main__':
