@@ -1,7 +1,20 @@
 syntax = "proto3";
 
 package proto;
+
 import "proto/common.proto";
+import "google/protobuf/timestamp.proto";
+
+message Block {
+	
+	double index = 1;
+	string hash = 2;
+	string previous_hash = 3;
+	double timestamp = 4;
+	string merkle_root = 5;
+	repeated FileAuditRequest file_audit_requests = 6;
+
+}
 
 message WhisperResponse{
 	
@@ -10,6 +23,14 @@ message WhisperResponse{
 	
 }
 
+message ProposeResponse{
+	
+	string status = 1; // success,failure
+	string error = 2 ; // error message incase of failure 
+	
+}
+
 service BlockChainService {
 	rpc WisperAuditRequest ( FileAuditRequest ) returns ( WhisperResponse );
+	rpc ProposeBlock (Block) returns (ProposeResponse);
 } 

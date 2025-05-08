@@ -8,12 +8,9 @@ from proto import file_audit_pb2_grpc
 
 from modules.merkle import MerkleTree
 
-
+'''
 from enum import Enum
 
-
-
-'''
 class AccessType(Enum):
     READ = 1,
     UPDATE = 2,
