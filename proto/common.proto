@@ -10,19 +10,22 @@ enum AccessType {
 	DELETE = 4;
 }
 
-message AuditInfo {
-	
-	string audit_id = 1;
-	string user_id = 2;
-	AccessType access_type = 3;
+message FileInfo {
+	string file_id = 1;    // e.g. inode on Linux/Mac (stat command)
+	string file_name = 2;
 }
 
-message FileAuditRequest{
-	     
-	string file_id = 1;
-	AuditInfo audit_info = 2;
-	string signature = 3;    // To verify the signature
-	string public_key = 4;   // To verify the signature
+message UserInfo {
+	string user_id = 1;    // e.g. id --user on Linux
+	string user_name = 2;
 }
 
-
+message FileAudit {
+	string req_id = 1;     // incase of async
+	FileInfo file_info = 2;
+	UserInfo user_info = 3;
+	AccessType access_type = 4;
+	int64 timestamp = 5;
+	string signature = 6;    // To verify the signature
+	string public_key = 7;   // To verify the signature
+}

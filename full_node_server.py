@@ -65,7 +65,7 @@ class FullNode () :
         self.mem_pool.remove(req)
             
     
-    def store_file_audits(self,file_id, audit_id, block_id):
+    def store_file_audits(self, file_id, audit_id, block_id):
         
         audit_details = AuditDetails(audit_id, block_id)
         if file_id in self.audit_details_byfile :
@@ -115,7 +115,7 @@ class FullNode () :
                     req_and_future =  await self.request_queue.get()
                     request_and_future_list.append(req_and_future)
                     audit_request = req_and_future[0]
-                    audit_info = str(audit_request.audit_info)
+                    audit_info = str(audit_request.file_info)
                     same_block_audits.append(audit_info)
 
                 
@@ -140,8 +140,8 @@ class FullNode () :
                 
                 index = 0
                 for request,future  in request_and_future_list :
-                    file_id = request.file_id
-                    audit_id = request.audit_info.audit_id
+                    file_id = request.file_info.file_id
+                    audit_id = request.req_id
                     block_hash = new_block.hash
                     
                     # persist the every audit's block information - 

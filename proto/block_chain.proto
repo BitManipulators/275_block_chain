@@ -12,7 +12,7 @@ message Block {
 	string previous_hash = 3;
 	double timestamp = 4;
 	string merkle_root = 5;
-	repeated FileAuditRequest file_audit_requests = 6;
+	repeated FileAudit file_audit_requests = 6;
 	repeated string file_audits = 7;
 
 }
@@ -39,7 +39,7 @@ message GenesisResponse{
 }
 
 service BlockChainService {
-	rpc wisperAuditRequest ( FileAuditRequest ) returns ( WhisperResponse );
+	rpc wisperAuditRequest ( FileAudit ) returns ( WhisperResponse );
 	rpc proposeBlock (Block) returns (ProposeResponse);
 	rpc getGenesisBlock (google.protobuf.Empty) returns (Block);
 } 
