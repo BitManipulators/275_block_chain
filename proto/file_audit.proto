@@ -5,19 +5,16 @@ package proto;
 import "proto/common.proto";
 
 
-
-message FileAuditResponse {
-	
+message FileAuditResponse {	
 	string merkle_root = 1;
-	repeated string merkle_proof = 2 ;
-	int64 audit_index = 3 ;
-	string status = 4 ;  // success, failure
+	repeated string merkle_proof = 2;
+	int64 audit_index = 3;
+	string status = 4;  // success, failure
 	string error_message = 5; // If its failure
-
 }
 
 service FileAuditService {
-	rpc SubmitAudit ( proto.FileAuditRequest ) returns ( FileAuditResponse );
+	rpc SubmitAudit ( proto.FileAudit ) returns ( FileAuditResponse );
 }
 
 
