@@ -16,6 +16,7 @@ from proto import file_audit_pb2_grpc
 from enum import Enum
 
 from modules.merkle import MerkleTree
+from modules.signature import create_signature, verify_signature
 
 
 TASKS = set()
@@ -68,10 +69,9 @@ def create_random_request(rng):
     user_info = user_infos[rng.randint(0, len(user_infos) - 1)]
     access_type = access_types[rng.randint(0, len(access_types) - 1)]
 
-    signature = "todo"
-    public_key = "todo"
+    signature, public_key = create_signature(req_id, file_info, user_info, access_type, timestamp)
 
-    file_audit_request = common_pb2.FileAudit(
+    file_audit = common_pb2.FileAudit(
         req_id = req_id,
         file_info=file_info,
         user_info=user_info,
@@ -81,9 +81,13 @@ def create_random_request(rng):
         public_key=public_key,
     )
 
+    verified = verify_signature(file_audit)
+    if not verified:
+        raise Exception("Signature was not verified!")
+
     print(f"Created request: {req_id} with file_id {file_info.file_id}, user_id {user_info.user_id}, and signature {signature}")
 
-    return file_audit_request
+    return file_audit
 
 
 async def client_loop(args, config):
