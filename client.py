@@ -171,7 +171,7 @@ def parse_args():
     parser.add_argument(
         "--max-total-requests",
         type=int,
-        default=9,
+        default=3,
         help="Total number of requests to send before shutdown (omit or 0 for infinite)"
     )
 
