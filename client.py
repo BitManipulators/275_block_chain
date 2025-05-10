@@ -8,10 +8,10 @@ import time
 import uuid
 import yaml
 
-from proto import common_pb2
-from proto import common_pb2_grpc
-from proto import file_audit_pb2
-from proto import file_audit_pb2_grpc
+import common_pb2
+import common_pb2_grpc
+import file_audit_pb2
+import file_audit_pb2_grpc
 
 from enum import Enum
 
@@ -120,11 +120,12 @@ async def client_loop(args, config):
             try:
                 response = t.result()
 
-                audit_index = response.audit_index
-                merkle_proof = response.merkle_proof
-                merkle_root = response.merkle_root
+                #audit_index = response.audit_index
+                #merkle_proof = response.merkle_proof
+                #merkle_root = response.merkle_root
 
-                print(f"[✓] Got response for {audit_index}! Merkle proof {merkle_proof} and merkle root: {merkle_root}")
+                #print(f"[✓] Got response for {audit_index}! Merkle proof {merkle_proof} and merkle root: {merkle_root}")
+                print(f"[✓] Got response! Status: {response.status}")
                 #print("Is valid", MerkleTree.verify_merkle_proof(str(audit_info), audit_index, merkle_proof, merkle_root))
             except Exception as e:
                 print(f"[!] Request failed: {e}")

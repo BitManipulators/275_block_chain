@@ -26,14 +26,12 @@ def create_signature(req_id, file_info, user_info, access_type, timestamp):
 
     print(string_to_sign)
 
-    home_dir = str(Path.home())
+    import pdb; pdb.set_trace()
 
-    # Load private key from ~/.ssh/id_rsa
-    with open(f"{home_dir}/.ssh/id_rsa", "rb") as private_key_file:
-        private_key = serialization.load_ssh_private_key(
-            private_key_file.read(),
-            password=None,
-        )
+    with open("private_key.pem", "rb") as f:
+        key_data = f.read()
+
+    private_key = serialization.load_pem_private_key(key_data, password=None)
 
     signature = private_key.sign(
         string_to_sign.encode('utf-8'),
@@ -41,7 +39,7 @@ def create_signature(req_id, file_info, user_info, access_type, timestamp):
         hashes.SHA256()
     )
 
-    with open(f"{home_dir}/.ssh/id_rsa.pub", "r") as public_key_file:
+    with open(f"public_key.pem", "rb") as public_key_file:
         public_key = public_key_file.read()
 
     return base64.b64encode(signature).decode(), public_key
@@ -54,7 +52,7 @@ def verify_signature(file_audit):
                                      file_audit.access_type,
                                      file_audit.timestamp)
 
-    public_key = serialization.load_ssh_public_key(file_audit.public_key.encode('utf-8'))
+    public_key = serialization.load_pem_public_key(file_audit.public_key.encode('utf-8'))
 
     try:
         public_key.verify(

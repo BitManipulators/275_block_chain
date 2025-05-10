@@ -3,20 +3,21 @@ import asyncio
 import grpc
 import time
 
-from proto import block_chain_pb2
-from proto import block_chain_pb2_grpc
-from proto import common_pb2
-from proto import common_pb2_grpc
-from proto import file_audit_pb2
-from proto import file_audit_pb2_grpc
+import block_chain_pb2
+import block_chain_pb2_grpc
+import common_pb2
+import common_pb2_grpc
+import file_audit_pb2
+import file_audit_pb2_grpc
 
 from modules.block import Block
 from modules.merkle import MerkleTree
+from modules.signature import verify_signature
 
 from google.protobuf import empty_pb2
 
 
-BLOCK_SIZE = 3
+BLOCK_SIZE = 1
 AUDIT_REQUESTS_MAP = {}
 
 
@@ -35,7 +36,7 @@ class FullNode():
         self.blocks = [Block.create_genesis_block()]
         self.audit_details_byfile = {}  # Lookup data strcture based on File Id
         self.leader = False
-        self.neighbors = ['[::]:50052','[::]:50053']
+        self.neighbors = ['10.250.244.154:50051','[::]:50053']
 
 
     def create_block(self, audits, merkle_tree):
@@ -75,23 +76,23 @@ class FullNode():
     async def send_block_proposal(self, block, audit_requests):
         votes = 1
 
-        grpc_block = block_chain_pb2.Block(index=block.index,
-                                  hash=block.hash,
-                                  previous_hash=block.previous_hash,
-                                  timestamp=block.timestamp,
+        grpc_block = block_chain_pb2.Block(
+                                  block_hash=block.hash,
+                                  previous_block_hash=block.previous_hash,
+                                  timestamp=int(block.timestamp),
                                   merkle_root=block.merkle_root,
-                                  file_audit_requests = audit_requests,
-                                  file_audits = block.audits )
+                                  #file_audit_requests = audit_requests,
+                                  audits = audit_requests )
 
-        for neighbor in self.neighbors:
-            async with grpc.aio.insecure_channel(neighbor) as channel:
-                stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+        # for neighbor in self.neighbors:
+        #     async with grpc.aio.insecure_channel(neighbor) as channel:
+        #         stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
 
-                response = await stub.proposeBlock(grpc_block)
-                print("Propose block response received:", response)
+        #         response = await stub.ProposeBlock(grpc_block)
+        #         print("Propose block response received:", response)
 
-                if response.vote:
-                    votes += 1
+        #         if response.vote:
+        #             votes += 1
 
         return grpc_block, votes
 
@@ -99,7 +100,7 @@ class FullNode():
     async def whisper_audits(self, request, peer_address):
         async with grpc.aio.insecure_channel(peer_address) as channel:
             stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
-            response = await stub1.wisperAuditRequest(request)
+            response = await stub1.WhisperAuditRequest(request)
             print("Whisper response received:", response)
 
 
@@ -116,7 +117,7 @@ class FullNode():
 
 
     def resolve_request_futures(self, new_block, grpc_block):
-        for file_audit_request in grpc_block.file_audit_requests:
+        for file_audit_request in grpc_block.audits:
             future = AUDIT_REQUESTS_MAP[file_audit_request.req_id]
             future.set_result(new_block)
 
@@ -126,8 +127,8 @@ class FullNode():
             async with grpc.aio.insecure_channel(neighbor) as channel:
                 stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
 
-                response = await stub.commitBlock(grpc_block)
-                print("Commit block response received:", response)
+                # response = await stub.commitBlock(grpc_block)
+                # print("Commit block response received:", response)
 
         self.resolve_request_futures(new_block, grpc_block)
 
@@ -141,13 +142,15 @@ class FullNode():
         # create merkle tree
         merkle_tree = MerkleTree(block_audits)
 
+        #import pdb; pdb.set_trace()
         # create new block in the chain
         new_block = self.create_block([audit.req_id for audit in block_audits], merkle_tree)
-
+        
+        #import pdb; pdb.set_trace();
         try:
             grpc_block, votes = await self.send_block_proposal(new_block, block_audits)
 
-            if votes >= 2:
+            if votes >= 0:
                 await self.commit_block(new_block, grpc_block)
 
         except Exception as e:
@@ -184,34 +187,42 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
 
     async def SubmitAudit(self, request, context):
         print("Got a new audit request")
+        
+        verified = verify_signature(request)
+        
+        if verified:
+            return file_audit_pb2.FileAuditResponse(status="success")
+        else:
+            return file_audit_pb2.FileAuditResponse(status="failure")
+        
         #print(request)
 
         # Whisper it to all neighbors
-        whisper_tasks = []
+        # whisper_tasks = []
 
-        try:
-            neighbors = ['[::]:50052','[::]:50053']
-            for neighbor in neighbors :
-                whisper_task = asyncio.create_task(full_node.whisper_audits(request, neighbor))
-                whisper_tasks.append(whisper_task)
-        except Exception as e :
-            print(f"An error occurred: {e}")
+        # try:
+        #     neighbors = ['[::]:50052','[::]:50053']
+        #     for neighbor in neighbors :
+        #         whisper_task = asyncio.create_task(full_node.whisper_audits(request, neighbor))
+        #         whisper_tasks.append(whisper_task)
+        # except Exception as e :
+        #     print(f"An error occurred: {e}")
 
-        for whisper_task in whisper_tasks:
-            await whisper_task
+        # for whisper_task in whisper_tasks:
+        #     await whisper_task
 
-        await full_node.request_queue.put(request)
+        # await full_node.request_queue.put(request)
 
-        future = asyncio.get_event_loop().create_future()
-        AUDIT_REQUESTS_MAP[request.req_id] = future
-        block = await future
-        del AUDIT_REQUESTS_MAP[request.req_id]
+        # future = asyncio.get_event_loop().create_future()
+        # AUDIT_REQUESTS_MAP[request.req_id] = future
+        # block = await future
+        # del AUDIT_REQUESTS_MAP[request.req_id]
 
         # todo create response using block data
-        response = file_audit_pb2.FileAuditResponse(status="success",
+        response = file_audit_pb2.FileAuditResponse(status="success")
                                                     #merkle_proof = block.merkle_tree.get_merkle_proof(index),
                                                     #audit_index = block.index,
-                                                    merkle_root = block.merkle_root)
+                                                    #merkle_root = block.merkle_root)
         return response
 
 
@@ -220,13 +231,13 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         self.full_node = full_node
 
 
-    async def wisperAuditRequest(self, request, context):
+    async def WhisperAuditRequest(self, request, context):
         print("Got an audit whispered from a peer")
         await full_node.request_queue.put(request)
         return block_chain_pb2.WhisperResponse(status="success")
 
 
-    async def proposeBlock(self, proposed_block_request, context):
+    async def ProposeBlock(self, proposed_block_request, context):
         for file_audit_request in proposed_block_request.file_audit_requests:
             if file_audit_request in self.full_node.mem_pool:
                 continue

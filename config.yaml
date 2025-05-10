@@ -1,4 +1,4 @@
 servers:
-  - address: 127.0.0.1:50051
-#  - address: 127.0.0.1:50052
-#  - address: 127.0.0.1:50053
+  - address: 0.0.0.0:50051
+#  - address: 10.250.244.154:50051 #serhat
+#  - address: 10.250.183.89:50051   #yash
