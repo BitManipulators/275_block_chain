@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import base64
+import json
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
@@ -8,15 +9,15 @@ from pathlib import Path
 
 
 def create_string(req_id, file_info, user_info, access_type, timestamp):
-    string_to_sign = ",".join([
-        req_id,
-        str(file_info.file_id),
-        file_info.file_name,
-        str(user_info.user_id),
-        user_info.user_name,
-        str(access_type),
-        str(timestamp),
-    ])
+    audit = {
+        "req_id": req_id,
+        "file_info": {"file_id": file_info.file_id, "file_name": file_info.file_name},
+        "user_info": {"user_id": user_info.user_id, "user_name": user_info.user_name},
+        "access_type": access_type,
+        "timestamp": int(timestamp),
+    }
+
+    string_to_sign = json.dumps(audit, sort_keys=True)
 
     return string_to_sign
 
@@ -25,8 +26,6 @@ def create_signature(req_id, file_info, user_info, access_type, timestamp):
     string_to_sign = create_string(req_id, file_info, user_info, access_type, timestamp)
 
     print(string_to_sign)
-
-    import pdb; pdb.set_trace()
 
     with open("private_key.pem", "rb") as f:
         key_data = f.read()

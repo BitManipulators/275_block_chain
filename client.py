@@ -166,13 +166,13 @@ def parse_args():
     parser.add_argument(
         "--max-num-requests-in-flight",
         type=int,
-        default=3,
+        default=1,
         help="Maximum number of concurrent requests in flight at same time"
     )
     parser.add_argument(
         "--max-total-requests",
         type=int,
-        default=3,
+        default=1,
         help="Total number of requests to send before shutdown (omit or 0 for infinite)"
     )
 

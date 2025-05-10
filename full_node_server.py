@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import asyncio
 import grpc
@@ -142,11 +144,9 @@ class FullNode():
         # create merkle tree
         merkle_tree = MerkleTree(block_audits)
 
-        #import pdb; pdb.set_trace()
         # create new block in the chain
         new_block = self.create_block([audit.req_id for audit in block_audits], merkle_tree)
         
-        #import pdb; pdb.set_trace();
         try:
             grpc_block, votes = await self.send_block_proposal(new_block, block_audits)
 
