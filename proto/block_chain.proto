@@ -24,11 +24,15 @@ message WhisperResponse{
 	
 }
 
-message ProposeResponse{
-	
-	string status = 1; // success,failure
-	string error = 2 ; // error message incase of failure 
-	
+message ProposeResponse {
+	bool vote = 1;
+	string status = 2; // success, failure
+	optional string error = 3; // error message incase of failure
+}
+
+message CommitResponse {
+	string status = 1; // success, failure
+	optional string error = 2; // error message incase of failure
 }
 
 message GenesisResponse{
@@ -41,5 +45,6 @@ message GenesisResponse{
 service BlockChainService {
 	rpc wisperAuditRequest ( FileAudit ) returns ( WhisperResponse );
 	rpc proposeBlock (Block) returns (ProposeResponse);
+	rpc commitBlock (Block) returns (CommitResponse);
 	rpc getGenesisBlock (google.protobuf.Empty) returns (Block);
 } 
