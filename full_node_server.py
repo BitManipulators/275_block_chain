@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import grpc
 import time
+import yaml
 
 import block_chain_pb2
 import block_chain_pb2_grpc
@@ -23,116 +24,131 @@ BLOCK_SIZE = 1
 AUDIT_REQUESTS_MAP = {}
 
 
-class AuditDetails():
-    def __init__(self, audit_id , block_id):
-        self.audit_id = audit_id
-        self.block_id = block_id
-
-
 class FullNode():
-    def __init__(self, args):
+    def __init__(self, args, config):
         self.request_queue = asyncio.Queue()
         self.mem_pool = []
         self.port = args.port
-        self.isvalidator = args.isvalidator
-        self.blocks = [Block.create_genesis_block()]
-        self.audit_details_byfile = {}  # Lookup data strcture based on File Id
-        self.leader = False
-        self.neighbors = ['10.250.244.154:50051','[::]:50053']
+        self.blocks = [] # TODO (aishwarya): this should be on disk
+        self.leader = args.is_leader
+        self.neighbors = [server['address'] for server in config['servers']]
 
 
     def create_block(self, audits, merkle_tree):
-        last_block = self.blocks[-1]
-        new_block = Block(index = last_block.index+1,
-                          previous_hash=last_block.hash,
+        if len(self.blocks) == 0:
+            previous_hash = ""
+            index = 0
+        else:
+            last_block = self.blocks[-1]
+            previous_hash = last_block.hash
+            index = last_block.index+1
+
+        new_block = Block(index=index,
+                          previous_hash=previous_hash,
                           audits=audits,
                           merkle_root=merkle_tree.root)
 
         self.blocks.append(new_block)
         return new_block
 
+    def verify_previous_block_hash(self, block):
+        # Check for the last stored hash and prev hash from the request
+        if len(self.blocks) == 0:
+            previous_block_hash = ""
+        else:
+            previous_block_hash = self.blocks[-1].hash
+
+        if previous_block_hash != block.previous_hash:
+            print(f"verify_previous_block_hash previous hash {block.previous_hash} in block does not match {previous_block_hash}")
+            return False
+
+        return True
+
+
 
     def append_block(self, new_block):
-        print("Block appended!!!")
+        print(f"Block appended: {new_block.hash}")
         self.blocks.append(new_block)
 
 
     def append_to_mem_pool(self,req):
-        print("Request added to mem pool")
+        print(f"Request added to mem pool: {req.req_id}")
         self.mem_pool.append(req)
 
 
     def remove_from_mem_pool(self, req):
-        print("Requets Removed from mempool")
+        print(f"Request removed from mem pool: {req.req_id}")
         self.mem_pool.remove(req)
 
 
-    def store_file_audits(self, file_id, audit_id, block_id):
-        audit_details = AuditDetails(audit_id, block_id)
-        if file_id in self.audit_details_byfile :
-            self.audit_details_byfile[file_id].append(audit_details)
-        else :
-            self.audit_details_byfile[file_id] = [audit_details]
-
-
-    async def send_block_proposal(self, block, audit_requests):
-        votes = 1
-
-        grpc_block = block_chain_pb2.Block(
-                                  block_hash=block.hash,
-                                  previous_block_hash=block.previous_hash,
-                                  timestamp=int(block.timestamp),
-                                  merkle_root=block.merkle_root,
-                                  #file_audit_requests = audit_requests,
-                                  audits = audit_requests )
-
-        # for neighbor in self.neighbors:
-        #     async with grpc.aio.insecure_channel(neighbor) as channel:
-        #         stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
-
-        #         response = await stub.ProposeBlock(grpc_block)
-        #         print("Propose block response received:", response)
-
-        #         if response.vote:
-        #             votes += 1
-
-        return grpc_block, votes
-
-
-    async def whisper_audits(self, request, peer_address):
-        async with grpc.aio.insecure_channel(peer_address) as channel:
-            stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
-            response = await stub1.WhisperAuditRequest(request)
-            print("Whisper response received:", response)
-
-
-    async def process_queue(self):
-        while True:
-            request = await self.request_queue.get()
-
-            self.append_to_mem_pool(request)
-
-            if len(self.mem_pool) >= BLOCK_SIZE:
-                if self.isvalidator:
-                    print("Queue has reached BLOCK_SIZE, processing the queue ...")
-                    await self.propose_block()
+    async def broadcast_whisper_audits(self, request):
+        for neighbor in self.neighbors:
+            try:
+                async with grpc.aio.insecure_channel(neighbor) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                    response = await stub.WhisperAuditRequest(request)
+                    print(f"whisper_audits response received from {neighbor}: {response}")
+            except Exception as e:
+                print(f"An error occurred while whispering to {neighbor}: {e}")
 
 
     def resolve_request_futures(self, new_block, grpc_block):
-        for file_audit_request in grpc_block.audits:
-            future = AUDIT_REQUESTS_MAP[file_audit_request.req_id]
-            future.set_result(new_block)
+        for audit in grpc_block.audits:
+            if audit.req_id in AUDIT_REQUESTS_MAP:
+                future = AUDIT_REQUESTS_MAP[audit.req_id]
+                future.set_result(new_block)
+                del AUDIT_REQUESTS_MAP[audit.req_id]
 
 
-    async def commit_block(self, new_block, grpc_block):
+    async def broadcast_commit_block(self, new_block, grpc_block):
         for neighbor in self.neighbors:
-            async with grpc.aio.insecure_channel(neighbor) as channel:
-                stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+            try:
+                async with grpc.aio.insecure_channel(neighbor) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
 
-                # response = await stub.commitBlock(grpc_block)
-                # print("Commit block response received:", response)
+                    response = await stub.CommitBlock(grpc_block)
+                    print(f"broadcast_commit_block response received from {neighbor}: {response}")
+            except Exception as e:
+                print(f"broadcast_commit_block an error occurred while committing block to {neighbor}: {e}")
 
-        self.resolve_request_futures(new_block, grpc_block)
+
+    async def broadcast_block_proposal(self, grpc_block):
+        votes = 1
+
+        for neighbor in self.neighbors:
+            try:
+                async with grpc.aio.insecure_channel(neighbor) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+
+                    response = await stub.ProposeBlock(grpc_block)
+                    print(f"broadcast_block_proposal response received from {neighbor}: {response}")
+
+                    if response.vote:
+                        votes += 1
+            except Exception as e:
+                print(f"broadcast_block_proposal an error occurred while proposing block to {neighbor}: {e}")
+
+        return votes
+
+
+    async def commit_block(self, block):
+        # Remove from MemPool
+        for audit in block.audits:
+            if audit not in self.mem_pool:
+                print(f"commit_block audit {audit} was not in mem_pool!")
+                continue
+
+            self.remove_from_mem_pool(audit)
+
+        new_block = Block(index=block.id,
+                          hash=block.hash,
+                          previous_hash=block.previous_hash,
+                          audits=block.audits,
+                          merkle_root=block.merkle_root)
+
+        self.append_block(new_block)
+
+        self.resolve_request_futures(new_block, block)
 
 
     async def propose_block(self):
@@ -144,41 +160,47 @@ class FullNode():
         # create merkle tree
         merkle_tree = MerkleTree(block_audits)
 
-        # create new block in the chain
+        # Create new block in the chain
         new_block = self.create_block([audit.req_id for audit in block_audits], merkle_tree)
-        
-        try:
-            grpc_block, votes = await self.send_block_proposal(new_block, block_audits)
 
-            if votes >= 0:
-                await self.commit_block(new_block, grpc_block)
+        grpc_block = block_chain_pb2.Block(
+                                  id=new_block.index,
+                                  hash=new_block.hash,
+                                  previous_hash=new_block.previous_hash,
+                                  merkle_root=new_block.merkle_root,
+                                  audits=block_audits)
+
+        try:
+            votes = await self.broadcast_block_proposal(grpc_block)
+
+            if votes >= len(self.neighbors):
+                return new_block, grpc_block, True
 
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"propose_block an error occurred: {e}")
+
+        return None, None, False
 
 
-        print("Checking the queue...")
-        await asyncio.sleep(3)
+    async def process_queue(self):
+        while True:
+            try:
+                request = await asyncio.wait_for(self.request_queue.get(), timeout=3.0)
 
+                if request not in self.mem_pool:
+                    self.append_to_mem_pool(request)
+            except asyncio.TimeoutError:
+                pass
 
-    async def get_genesis_block(self):
-        async with grpc.aio.insecure_channel('[::]:50051') as channel:
-            stub1 = block_chain_pb2_grpc.BlockChainServiceStub(channel)
-            genesis_block_response = await stub1.getGenesisBlock(empty_pb2.Empty())
-            print("Geneis Block  received!!")
+            if len(self.mem_pool) >= BLOCK_SIZE:
+                if self.leader:
+                    print("Queue has reached BLOCK_SIZE, processing the queue ...")
 
-            genesis_block = Block(index=genesis_block_response.index,
-                              previous_hash=genesis_block_response.previous_hash,
-                              audits = genesis_block_response.file_audits,
-                              timestamp = genesis_block_response.timestamp,
-                              merkle_root= genesis_block_response.merkle_root,
-                              hash = genesis_block_response.hash
-                              )
-            
-            self.append_block(genesis_block)
-            
-        
-     
+                    new_block, grpc_block, block_proposal_accepted = await self.propose_block()
+                    if block_proposal_accepted:
+                        await self.broadcast_commit_block(new_block, grpc_block)
+                        await self.commit_block(grpc_block)
+
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
 
@@ -186,44 +208,35 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
         self.full_node = full_node
 
     async def SubmitAudit(self, request, context):
-        print("Got a new audit request")
-        
+        print(f"SubmitAudit {request.req_id}")
+
         verified = verify_signature(request)
-        
-        if verified:
-            return file_audit_pb2.FileAuditResponse(status="success")
-        else:
-            return file_audit_pb2.FileAuditResponse(status="failure")
-        
-        #print(request)
 
-        # Whisper it to all neighbors
-        # whisper_tasks = []
+        if not verified:
+            print(f"SubmitAudit: failed to verify {request.req_id}")
+            return file_audit_pb2.FileAuditResponse(
+                req_id=request.req_id,
+                status="failure",
+                error_message=f"Failed to verify audit {audit}")
 
-        # try:
-        #     neighbors = ['[::]:50052','[::]:50053']
-        #     for neighbor in neighbors :
-        #         whisper_task = asyncio.create_task(full_node.whisper_audits(request, neighbor))
-        #         whisper_tasks.append(whisper_task)
-        # except Exception as e :
-        #     print(f"An error occurred: {e}")
+        # Whisper the audit to all neighbors
+        await self.full_node.broadcast_whisper_audits(request)
 
-        # for whisper_task in whisper_tasks:
-        #     await whisper_task
+        # Create a future that is resolved once the audit is added to a block
+        future = asyncio.get_event_loop().create_future()
+        AUDIT_REQUESTS_MAP[request.req_id] = future
 
-        # await full_node.request_queue.put(request)
+        # Add this request to the queue
+        await full_node.request_queue.put(request)
 
-        # future = asyncio.get_event_loop().create_future()
-        # AUDIT_REQUESTS_MAP[request.req_id] = future
-        # block = await future
-        # del AUDIT_REQUESTS_MAP[request.req_id]
+        # Wait for the audit to be added to a block
+        block = await future
+        print(f"SubmitAudit {request.req_id} was added to block {block}")
 
-        # todo create response using block data
-        response = file_audit_pb2.FileAuditResponse(status="success")
-                                                    #merkle_proof = block.merkle_tree.get_merkle_proof(index),
-                                                    #audit_index = block.index,
-                                                    #merkle_root = block.merkle_root)
-        return response
+        return file_audit_pb2.FileAuditResponse(
+            req_id=request.req_id,
+            status="success"
+        )
 
 
 class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
@@ -232,107 +245,91 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
 
     async def WhisperAuditRequest(self, request, context):
-        print("Got an audit whispered from a peer")
+        print(f"WhisperAuditRequest {request.req_id}")
+
+        verified = verify_signature(request)
+
+        if not verified:
+            print(f"WhisperAuditRequest: failed to verify {request.req_id}")
+            return file_audit_pb2.FileAuditResponse(status="failure", error_message=f"Failed to verify audit {audit}")
+
         await full_node.request_queue.put(request)
         return block_chain_pb2.WhisperResponse(status="success")
 
 
-    async def ProposeBlock(self, proposed_block_request, context):
-        for file_audit_request in proposed_block_request.file_audit_requests:
-            if file_audit_request in self.full_node.mem_pool:
-                continue
-            else:
-                # verified_signature = todo()
-                # if not verified_signature:
-                #    return block_chain_pb2.ProposeResponse(status="failure", vote=False)
-                pass # verify signature
+    async def ProposeBlock(self, block, context):
+        print(f"ProposeBlock: {block.hash}")
 
-        return block_chain_pb2.ProposeResponse(status="success", vote=True)
+        if not self.full_node.verify_previous_block_hash(block):
+            return block_chain_pb2.BlockVoteResponse(
+                vote=False,
+                status="failure",
+                error_message="Previous block hash does not match"
+            )
+
+        for audit in block.audits:
+            if audit not in self.full_node.mem_pool:
+                # Fallback to verifying audit signatures
+                verified = verify_signature(audit)
+                if not verified:
+                    return block_chain_pb2.BlockVoteResponse(
+                        vote=False,
+                        status="failure",
+                        error_message=f"Failed to verify audit {audit}")
+
+        return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
 
 
-    async def commitBlock(self, proposed_block_request, context):
-        print("Got Block Proposal")
-        #print(proposed_block_request)
+    async def CommitBlock(self, block, context):
+        print(f"CommitBlock: {block.hash}")
 
-        #check for the last stored hash and prev hash from the request
-        if self.full_node.blocks[-1].hash == proposed_block_request.previous_hash :
-            print("Previous hash matches!!")
-            
-            file_audit_requests = proposed_block_request.file_audit_requests
-           
-            # Remove from MemPool
-            for req in file_audit_requests :
-                self.full_node.remove_from_mem_pool(req)
-                
-            
-            new_block = Block(index=proposed_block_request.index,
-                              previous_hash=proposed_block_request.previous_hash,
-                              audits=proposed_block_request.file_audits,
-                              timestamp = proposed_block_request.timestamp,
-                              merkle_root= proposed_block_request.merkle_root,
-                              hash = proposed_block_request.hash
-                              )
-            
-            self.full_node.append_block(new_block)
-            
-            return block_chain_pb2.CommitResponse(status="success")
-            
-        else:
-            
-            
-            print("Hash Didnot match")
-            #print("file_audit_requests  -  ", proposed_block_request.previous_hash)
-            #print("Previous block",self.full_node.blocks[-1].hash)
-            
-            return block_chain_pb2.CommitResponse(status="failure")
-         
-             
-        
-        
-    
-    async def getGenesisBlock(self, genesis_block_request, context):
-        
-        print("Got Genesis Block Request")
-        
-        genesis_block = self.full_node.blocks[0]
-        genesis_block_response = block_chain_pb2.Block(index=genesis_block.index,
-                                  hash=genesis_block.hash,
-                                  previous_hash=genesis_block.previous_hash,
-                                  timestamp=genesis_block.timestamp,
-                                  merkle_root=genesis_block.merkle_root,
-                                  )
-        return genesis_block_response
+        if not self.full_node.verify_previous_block_hash(block):
+            return block_chain_pb2.BlockCommitResponse(
+                status="failure",
+                error_message="Previous block hash does not match"
+            )
+
+        await self.full_node.commit_block(block)
+
+        return block_chain_pb2.BlockCommitResponse(status="success")
 
 
 async def serve(full_node):
-    
-    server = grpc.aio.server() 
-    
+    server = grpc.aio.server()
+
     file_audit_service = FileAuditService(full_node)
     file_audit_pb2_grpc.add_FileAuditServiceServicer_to_server(file_audit_service, server)
     block_chain_pb2_grpc.add_BlockChainServiceServicer_to_server(BlockChainService(full_node),server)
-    
+
     server.add_insecure_port('[::]:'+str(full_node.port))
     print("Server started on port ", full_node.port)
-    
-    if full_node.isvalidator:
-        await asyncio.gather(server.start(), full_node.process_queue())
-    else:
-        await asyncio.gather(full_node.get_genesis_block(), server.start(), full_node.process_queue())
-    
-    await server.wait_for_termination()  
+
+    await asyncio.gather(server.start(), full_node.process_queue())
+    await server.wait_for_termination()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Async gRPC block chain server")
+    parser.add_argument('--port', type=int, help='port number', default=50051)
+    parser.add_argument('--is_leader', help='is leader flag', action='store_true', default=False)
+    parser.add_argument('--is_local', help='local configuration', action='store_true', default=False)
+    return parser.parse_args()
+
 
 if __name__ == '__main__':
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--port',type=int, help='port number', default=50051)
-    parser.add_argument('--isvalidator',type=bool, help='validator flag', default=0)
-    args = parser.parse_args()
-    
-    full_node = FullNode(args)
-    
+    args = parse_args()
+
+    if args.is_local:
+        config_file_name = "local_config.yaml"
+    else:
+        config_file_name = "config.yaml"
+
+    with open(config_file_name) as f:
+        config = yaml.safe_load(f)
+
+    full_node = FullNode(args, config)
+
     print(full_node.port)
-    print(full_node.isvalidator)
-    
-    
+    print(full_node.leader)
+
     asyncio.run(serve(full_node))

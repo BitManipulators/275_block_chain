@@ -154,7 +154,7 @@ async def client_loop(args, config):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Async gRPC load generator")
+    parser = argparse.ArgumentParser(description="Async gRPC blockchain client")
 
     parser.add_argument(
         "--request-distribution-strategy",
@@ -175,6 +175,12 @@ def parse_args():
         default=1,
         help="Total number of requests to send before shutdown (omit or 0 for infinite)"
     )
+    parser.add_argument(
+        '--is_local',
+        action='store_true',
+        default=False,
+        help='local configuration',
+    )
 
     return parser.parse_args()
 
@@ -182,8 +188,17 @@ def parse_args():
 async def run():
     args = parse_args()
 
-    with open("config.yaml") as f:
+    if args.is_local:
+        config_file_name = "local_config.yaml"
+    else:
+        config_file_name = "config.yaml"
+
+    with open(config_file_name) as f:
         config = yaml.safe_load(f)
+
+    config = {
+        "servers": [{"address": "127.0.0.1:50051"}]
+    }
 
     await client_loop(args, config)
 

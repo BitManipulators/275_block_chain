@@ -1,0 +1,3 @@
+servers:
+  - address: localhost:50052
+  - address: localhost:50053
