@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package blockchain;
+
+option go_package = "github.com/sameersah/auditchain/proto_gen/block_chain";
+option java_package = "com.codecatalyst.auditchain.proto.blockchain";
+option java_outer_classname = "BlockChainProto";
+
+import "common.proto";
+
+message WhisperResponse {
+  string status = 1;         // "success", "failure"
+  string error_message = 2;
+}
+
+message Block {
+  int64 id = 1;                           // block id
+  string hash = 2;                        // hash of current block
+  string previous_hash = 3;               // hash of previous block
+  repeated common.FileAudit audits = 4;   // audits in mempool
+  string merkle_root = 5;
+}
+
+message BlockVoteResponse {
+  bool vote = 1;             // true/false: whether your server votes for the proposed block
+  string status = 2;         // "success", "failure"
+  string error_message = 3;
+}
+
+message BlockCommitResponse {
+  string status = 2;         // "success", "failure"
+  string error_message = 3;
+}
+
+service BlockChainService {
+  rpc WhisperAuditRequest (common.FileAudit) returns (WhisperResponse);
+  rpc ProposeBlock (Block) returns (BlockVoteResponse);
+  rpc CommitBlock (Block) returns (BlockCommitResponse);
+}

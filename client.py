@@ -8,10 +8,10 @@ import time
 import uuid
 import yaml
 
-from proto import common_pb2
-from proto import common_pb2_grpc
-from proto import file_audit_pb2
-from proto import file_audit_pb2_grpc
+import common_pb2
+import common_pb2_grpc
+import file_audit_pb2
+import file_audit_pb2_grpc
 
 from enum import Enum
 
@@ -120,11 +120,12 @@ async def client_loop(args, config):
             try:
                 response = t.result()
 
-                audit_index = response.audit_index
-                merkle_proof = response.merkle_proof
-                merkle_root = response.merkle_root
+                #audit_index = response.audit_index
+                #merkle_proof = response.merkle_proof
+                #merkle_root = response.merkle_root
 
-                print(f"[✓] Got response for {audit_index}! Merkle proof {merkle_proof} and merkle root: {merkle_root}")
+                #print(f"[✓] Got response for {audit_index}! Merkle proof {merkle_proof} and merkle root: {merkle_root}")
+                print(f"[✓] Got response! Status: {response.status}")
                 #print("Is valid", MerkleTree.verify_merkle_proof(str(audit_info), audit_index, merkle_proof, merkle_root))
             except Exception as e:
                 print(f"[!] Request failed: {e}")
@@ -153,7 +154,7 @@ async def client_loop(args, config):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Async gRPC load generator")
+    parser = argparse.ArgumentParser(description="Async gRPC blockchain client")
 
     parser.add_argument(
         "--request-distribution-strategy",
@@ -165,14 +166,20 @@ def parse_args():
     parser.add_argument(
         "--max-num-requests-in-flight",
         type=int,
-        default=3,
+        default=1,
         help="Maximum number of concurrent requests in flight at same time"
     )
     parser.add_argument(
         "--max-total-requests",
         type=int,
-        default=3,
+        default=1,
         help="Total number of requests to send before shutdown (omit or 0 for infinite)"
+    )
+    parser.add_argument(
+        '--is_local',
+        action='store_true',
+        default=False,
+        help='local configuration',
     )
 
     return parser.parse_args()
@@ -181,8 +188,17 @@ def parse_args():
 async def run():
     args = parse_args()
 
-    with open("config.yaml") as f:
+    if args.is_local:
+        config_file_name = "local_config.yaml"
+    else:
+        config_file_name = "config.yaml"
+
+    with open(config_file_name) as f:
         config = yaml.safe_load(f)
+
+    config = {
+        "servers": [{"address": "127.0.0.1:50051"}]
+    }
 
     await client_loop(args, config)
 

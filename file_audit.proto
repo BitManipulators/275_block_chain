@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package fileaudit;
+
+option go_package = "github.com/sameersah/auditchain/proto_gen/file_audit";
+option java_package = "com.codecatalyst.auditchain.proto.fileaudit";
+option java_outer_classname = "FileAuditProto";
+
+import "common.proto";
+
+message FileAuditResponse {
+  string req_id = 1;
+  string status = 2;          // "success" or "failure"
+  string error_message = 3;   // Optional error message
+}
+
+service FileAuditService {
+  rpc SubmitAudit (common.FileAudit) returns (FileAuditResponse);
+}
