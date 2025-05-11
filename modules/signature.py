@@ -17,7 +17,7 @@ def create_string(req_id, file_info, user_info, access_type, timestamp):
         "timestamp": int(timestamp),
     }
 
-    string_to_sign = json.dumps(audit, sort_keys=True)
+    string_to_sign = json.dumps(audit, sort_keys=True, separators=(",", ":"))
 
     return string_to_sign
 
