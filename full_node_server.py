@@ -5,6 +5,8 @@ import asyncio
 import grpc
 import time
 import yaml
+import os
+import json
 
 import block_chain_pb2
 import block_chain_pb2_grpc
@@ -18,6 +20,9 @@ from modules.merkle import MerkleTree
 from modules.signature import verify_signature
 
 from google.protobuf import empty_pb2
+from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import ParseDict
+# from block_chain_pb2 import Block
 
 
 BLOCK_SIZE = 1
@@ -29,7 +34,7 @@ class FullNode():
         self.request_queue = asyncio.Queue()
         self.mem_pool = []
         self.port = args.port
-        self.blocks = [] # TODO (aishwarya): this should be on disk
+        self.blocks = self.load_blocks_from_disk() # TODO (aishwarya): this should be on disk
         self.leader = args.is_leader
         self.neighbors = [server['address'] for server in config['servers']]
 
@@ -149,6 +154,8 @@ class FullNode():
         self.append_block(new_block)
 
         self.resolve_request_futures(new_block, block)
+        #print(f"Committing block {block.block_number}")
+        self.save_block_to_disk(block)
 
 
     async def propose_block(self):
@@ -200,6 +207,62 @@ class FullNode():
                     if block_proposal_accepted:
                         await self.broadcast_commit_block(new_block, grpc_block)
                         await self.commit_block(grpc_block)
+
+    # Save block to disk
+    def save_block_to_disk(self, block, path="./blocks"):
+        os.makedirs(path, exist_ok=True)
+        if not block.id:
+            block.id = 0
+        block_dict = MessageToDict(block, preserving_proto_field_name=True)
+        block_number = block.id
+
+        file_path = os.path.join(path, f"block_{block_number}.json")
+        with open(file_path, 'w') as f:
+            json.dump(block_dict, f, indent=4)
+        print(f"Block {block_number} saved to: {file_path}")
+
+    # Load blocks from disk
+    def load_blocks_from_disk(self, path="./blocks"):
+        blocks = []
+        if os.path.exists(path):
+            for fname in sorted(os.listdir(path)):
+                if fname.endswith(".json"):
+                    with open(os.path.join(path, fname)) as f:
+                        block_dict = json.load(f)
+                        print(f"[DEBUG] Loading block from {fname}: {block_dict}")
+
+                        if 'index' not in block_dict:
+                            try:
+                                block_num = int(fname.split('_')[1].split('.')[0])
+                                block_dict['index'] = block_num
+                                print(f"Added missing index {block_num} from filename")
+                            except (IndexError, ValueError):
+                                block_dict['index'] = len(blocks)
+                                print(f"Added missing index {len(blocks)} based on block count")
+
+                        if 'previous_hash' not in block_dict:
+                            # Default value for the first block or missing hash
+                            block_dict['previous_hash'] = "0"
+                            print(f"Added default previous_hash: 0")
+
+                        if 'audits' not in block_dict:
+                            # Default to an empty list if audits are missing
+                            block_dict['audits'] = []
+                            print(f"Added default audits: []")
+
+                        # Create a Block instance with the required fields
+                        block = Block(
+                            index=block_dict['index'],
+                            previous_hash=block_dict['previous_hash'],
+                            audits=block_dict['audits'],
+                            merkle_root=block_dict.get('merkle_root'),
+                            timestamp=block_dict.get('timestamp'),
+                            hash=block_dict.get('hash')
+                        )
+                        blocks.append(block)
+        print(f"Loaded {len(blocks)} block(s) from disk.")
+        return blocks
+
 
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
