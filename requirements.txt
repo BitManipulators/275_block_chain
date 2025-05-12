@@ -1,3 +1,5 @@
 asyncio  
 grpcio
 grpcio-tools
+pyyaml
+cryptography
