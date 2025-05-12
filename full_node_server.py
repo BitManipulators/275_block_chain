@@ -34,7 +34,8 @@ class FullNode():
         self.request_queue = asyncio.Queue()
         self.mem_pool = []
         self.port = args.port
-        self.blocks = self.load_blocks_from_disk() # TODO (aishwarya): this should be on disk
+        #self.blocks = self.load_blocks_from_disk() # TODO (aishwarya): this should be on disk
+        self.blocks = []
         self.leader = args.is_leader
         self.neighbors = [server['address'] for server in config['servers']]
 
