@@ -8,6 +8,8 @@ import time
 import uuid
 import yaml
 
+import block_chain_pb2
+import block_chain_pb2_grpc
 import common_pb2
 import common_pb2_grpc
 import file_audit_pb2
@@ -119,6 +121,11 @@ async def client_loop(args, config):
         for t in done:
             try:
                 response = t.result()
+
+                channel = random.choice(channels)
+                stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                get_block_response = await stub.GetBlock(block_chain_pb2.GetBlockRequest(id=0))
+                print(f"GetBlock response: {get_block_response.status} and {get_block_response.block.hash}")
 
                 #audit_index = response.audit_index
                 #merkle_proof = response.merkle_proof
