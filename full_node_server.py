@@ -90,17 +90,9 @@ class FullNode():
                         break
                     grpc_block = get_block_response.block
                     valid, validation_error_msg = await self.validate_block(grpc_block)
-
                     if not valid :
                         break
-                    
-                    #store valid blocks
-                    block = Block(index=grpc_block.id,
-                          hash=grpc_block.hash,
-                          previous_hash=grpc_block.previous_hash,
-                          audits=grpc_block.audits,
-                          merkle_root=grpc_block.merkle_root)
-                    self.blocks.append(block)
+                    await self.commit_block(grpc_block)
                     current_block_id += 1
             
             except Exception as e:
