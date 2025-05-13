@@ -2,7 +2,7 @@
 
 ## To generate proto - Run this from Home directory
 
-- python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. proto/block_chain.proto
+- python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. *.proto
 
 ## To Run server
 

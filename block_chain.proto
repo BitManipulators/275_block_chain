@@ -32,8 +32,32 @@ message BlockCommitResponse {
   string error_message = 3;
 }
 
+message GetBlockRequest {
+  int64 id = 1;
+} 
+
+message GetBlockResponse {
+  Block block = 1;
+  string status = 2;
+  string error_message = 3;  
+}
+
+message HeartbeatRequest {
+  string from_address = 1;
+  string current_leader_address = 2;
+  int64 latest_block_id = 3;
+  int64 mem_pool_size = 4;
+}
+
+message HeartbeatResponse {
+  string status = 1;   // "success", "failure"  
+  string error_message = 2;  
+}
+
 service BlockChainService {
   rpc WhisperAuditRequest (common.FileAudit) returns (WhisperResponse);
   rpc ProposeBlock (Block) returns (BlockVoteResponse);
   rpc CommitBlock (Block) returns (BlockCommitResponse);
+  rpc GetBlock (GetBlockRequest) returns (GetBlockResponse);
+  rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse);
 }

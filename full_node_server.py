@@ -21,7 +21,10 @@ from google.protobuf import empty_pb2
 
 
 BLOCK_SIZE = 1
+HEARTBEAT_INTERVAL_SECONDS = 2
+
 AUDIT_REQUESTS_MAP = {}
+HEARTBEATS_MAP = {}
 
 
 class FullNode():
@@ -31,7 +34,38 @@ class FullNode():
         self.port = args.port
         self.blocks = [] # TODO (aishwarya): this should be on disk
         self.leader = args.is_leader
-        self.neighbors = [server['address'] for server in config['servers']]
+        self.address = args.ip + ":" + str(args.port)
+        self.neighbors = [server['address'] for server in config['servers'] if server['address'] != self.address]
+        print(f"Neighbors: {self.neighbors}")
+
+
+    async def send_heartbeats(self):
+        while True:
+            for neighbor in self.neighbors:
+                heartbeat_request = block_chain_pb2.HeartbeatRequest(
+                    from_address=self.address,
+                    current_leader_address=self.address if self.leader else "",
+                    latest_block_id=len(self.blocks) - 1,
+                    mem_pool_size=len(self.mem_pool),
+                )
+
+                print(f"{self.address}: {len(self.blocks)} and {len(self.mem_pool)}")
+                print(heartbeat_request)
+
+                try:
+                    async with grpc.aio.insecure_channel(neighbor) as channel:
+                        stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                        heartbeat_response = await stub.SendHeartbeat(heartbeat_request)
+                        if heartbeat_response.error_message:
+                            print(f"send_heartbeats an error_message from {neighbor}: heartbeat_response.error_message")
+                except Exception as e:
+                    print(f"send_heartbeats an error occurred sending to {neighbor}: {e}")
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+
+
+    def create_heartbeat_tasks(self):
+        send_heartbeats_task = asyncio.create_task(self.send_heartbeats())
+        return [send_heartbeats_task]
 
 
     def create_block(self, audits, merkle_tree):
@@ -48,8 +82,8 @@ class FullNode():
                           audits=audits,
                           merkle_root=merkle_tree.root)
 
-        self.blocks.append(new_block)
         return new_block
+
 
     def verify_previous_block_hash(self, block):
         # Check for the last stored hash and prev hash from the request
@@ -63,7 +97,6 @@ class FullNode():
             return False
 
         return True
-
 
 
     def append_block(self, new_block):
@@ -161,7 +194,7 @@ class FullNode():
         merkle_tree = MerkleTree(block_audits)
 
         # Create new block in the chain
-        new_block = self.create_block([audit.req_id for audit in block_audits], merkle_tree)
+        new_block = self.create_block(block_audits, merkle_tree)
 
         grpc_block = block_chain_pb2.Block(
                                   id=new_block.index,
@@ -294,6 +327,28 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         return block_chain_pb2.BlockCommitResponse(status="success")
 
 
+    async def GetBlock(self, request, context):
+        if request.id < len(self.full_node.blocks):
+            block = self.full_node.blocks[request.id]
+
+            grpc_block = block_chain_pb2.Block(
+                             id=block.index,
+                             hash=block.hash,
+                             previous_hash=block.previous_hash,
+                             merkle_root=block.merkle_root,
+                             audits=block.audits)
+
+            return block_chain_pb2.GetBlockResponse(block=grpc_block, status="success")
+        else:
+            return block_chain_pb2.GetBlockResponse(status="failure", error_message=f"Block id {request.id} does not exist")
+
+
+    async def SendHeartbeat(self, request, context):
+        HEARTBEATS_MAP[request.from_address] = (time.time(), request)
+        print(f"SendHeartbeat received heartbeat from {request.from_address} with mem_pool {request.mem_pool_size} and latest_block_id {request.latest_block_id}")
+        return block_chain_pb2.HeartbeatResponse(status="success")
+
+
 async def serve(full_node):
     server = grpc.aio.server()
 
@@ -304,12 +359,14 @@ async def serve(full_node):
     server.add_insecure_port('[::]:'+str(full_node.port))
     print("Server started on port ", full_node.port)
 
-    await asyncio.gather(server.start(), full_node.process_queue())
+    heartbeat_tasks = full_node.create_heartbeat_tasks()
+    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks)
     await server.wait_for_termination()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Async gRPC block chain server")
+    parser.add_argument('--ip', help='ip address or hostname', default="")
     parser.add_argument('--port', type=int, help='port number', default=50051)
     parser.add_argument('--is_leader', help='is leader flag', action='store_true', default=False)
     parser.add_argument('--is_local', help='local configuration', action='store_true', default=False)
