@@ -21,7 +21,8 @@ from google.protobuf import empty_pb2
 
 
 BLOCK_SIZE = 1
-HEARTBEAT_INTERVAL_SECONDS = 10
+HEARTBEAT_INTERVAL_SECONDS = 2
+HEARTBEAT_TIMEOUT_THRESHOLD_SECONDS = 7
 
 AUDIT_REQUESTS_MAP = {}
 HEARTBEATS_MAP = {}
@@ -33,10 +34,12 @@ class FullNode():
         self.mem_pool = []
         self.port = args.port
         self.blocks = [] # TODO (aishwarya): this should be on disk
-        self.leader = args.is_leader
+        self.is_leader = args.is_leader
+        self.current_leader = None
         self.address = args.ip + ":" + str(args.port)
         self.neighbors = [server['address'] for server in config['servers'] if server['address'] != self.address]
         self.audit_hash_store = {}
+        self.term = 0
         print(f"Neighbors: {self.neighbors}")
 
 
@@ -45,7 +48,7 @@ class FullNode():
             for neighbor in self.neighbors:
                 heartbeat_request = block_chain_pb2.HeartbeatRequest(
                     from_address=self.address,
-                    current_leader_address=self.address if self.leader else "",
+                    current_leader_address=self.address if self.is_leader else "",
                     latest_block_id=len(self.blocks) - 1,
                     mem_pool_size=len(self.mem_pool),
                 )
@@ -67,7 +70,11 @@ class FullNode():
 
     def create_heartbeat_tasks(self):
         send_heartbeats_task = asyncio.create_task(self.send_heartbeats())
-        return [send_heartbeats_task]
+        monitor_heartbeat_latest_block_task = asyncio.create_task(self.monitor_heartbeat_latest_blocks())
+        monitor_missed_heartbeats_task = asyncio.create_task(self.monitor_missed_heartbeats())
+
+        return [send_heartbeats_task, monitor_heartbeat_latest_block_task, monitor_missed_heartbeats_task]
+
 
     async def synchronize_blocks(self, latest_block_id,neighbor_address):
         print(f"synchronize_blocks latest_block_id : {latest_block_id} neighbor_address : {neighbor_address}")
@@ -92,20 +99,156 @@ class FullNode():
             except Exception as e:
                 print(f"synchronize_blocks an error occurred sending to {neighbor_address}: {e}")
                 break
-    async def monitor_heartbeats(self):
-        while True :
-            for neighbor in self.neighbors:
-                if neighbor in HEARTBEATS_MAP :
-                    last_time, heart_beat_info = HEARTBEATS_MAP[neighbor]
-                    other_latest_block_id = heart_beat_info.latest_block_id
-                    if  not self.leader :
-                        local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks)-1
-                        if local_last_block_id <  other_latest_block_id :
-                            await self.synchronize_blocks(other_latest_block_id,neighbor)
+
+
+    async def monitor_heartbeat_latest_blocks(self):
+        while True:
+            for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+                if not heartbeat_data['is_valid']:
+                    continue
+
+                other_latest_block_id = heartbeat_data['request'].latest_block_id
+                if not self.is_leader:
+                    local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks) - 1
+                    if local_last_block_id < other_latest_block_id:
+                        await self.synchronize_blocks(other_latest_block_id, neighbor)
+
             await asyncio.sleep(2)
-    async def create_monitor_task(self):
-        monitor_task = asyncio.create_task(self.monitor_heartbeats())
-        return monitor_task
+
+
+    async def monitor_missed_heartbeats(self):
+        while True:
+            now = time.time()
+            for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+                if not heartbeat_data['is_valid']:
+                    continue
+
+                if now - heartbeat_data['time'] > HEARTBEAT_TIMEOUT_THRESHOLD_SECONDS:
+                    heartbeat_data['is_valid'] = False
+                    print(f"Missed heartbeats from {neighbor}, now {now} and last_time {heartbeat_data['time']}")
+
+            await asyncio.sleep(HEARTBEAT_TIMEOUT_THRESHOLD_SECONDS)
+
+
+    def get_best_server_to_elect(self):
+        best_neighbor_address = self.address
+        best_neighbor_block_id = len(self.blocks) - 1
+        best_neighbor_mem_pool_size = len(self.mem_pool)
+
+        for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+            if not heartbeat_data['is_valid']:
+                continue
+
+            if heartbeat_data['request'].latest_block_id > best_neighbor_block_id:
+                best_neighbor_address = neighbor
+                best_neighbor_block_id = heartbeat_data['request'].latest_block_id
+                best_neighbor_mem_pool_size = heartbeat_data['request'].mem_pool_size
+                continue
+
+            if heartbeat_data['request'].mem_pool_size > best_neighbor_mem_pool_size:
+                best_neighbor_address = neighbor
+                best_neighbor_block_id = heartbeat_data['request'].latest_block_id
+                best_neighbor_mem_pool_size = heartbeat_data['request'].mem_pool_size
+                continue
+
+            if neighbor > best_neighbor_address:
+                best_neighbor_address = neighbor
+                best_neighbor_block_id = heartbeat_data['request'].latest_block_id
+                best_neighbor_mem_pool_size = heartbeat_data['request'].mem_pool_size
+
+#        print(f"best_neighbor_to_elect {best_neighbor_address} {best_neighbor_block_id} {best_neighbor_mem_pool_size}")
+        return best_neighbor_address
+
+
+    def should_trigger_election(self):
+        print(self.current_leader)
+
+        if self.is_leader:
+            return False
+
+        num_alive_neighbors = 0
+        for heartbeat_data in HEARTBEATS_MAP.values():
+            if heartbeat_data['is_valid']:
+                num_alive_neighbors += 1
+
+        best_server_address = self.get_best_server_to_elect()
+
+        if self.current_leader is None:
+            if num_alive_neighbors > 0: # TODO: consider larger number of alive neighbors before triggering election?
+                if best_server_address == self.address:
+                    return True
+        else:
+            if self.current_leader in HEARTBEATS_MAP:
+                heartbeat_data = HEARTBEATS_MAP[self.current_leader]
+                if not heartbeat_data['is_valid']: # current_leader is offline
+                    if best_server_address == self.address:
+                        return True
+
+        return False
+
+
+    async def handle_trigger_election(self):
+        self.term += 1
+        request = block_chain_pb2.TriggerElectionRequest(term=self.term, address=self.address)
+
+        for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+            if not heartbeat_data['is_valid']:
+                continue
+
+            try:
+                async with grpc.aio.insecure_channel(neighbor) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                    response = await stub.TriggerElection(request)
+                    print(f"trigger_election response received from {neighbor}: {response}")
+
+                    # If any server has a higher term number, update our term and cancel our election
+                    if response.term > self.term:
+                        self.term = response.term
+                        return
+
+                    # Count vote if vote true
+                    if not response.vote:
+                        return
+
+            except Exception as e:
+                print(f"An error occurred while triggering election to {neighbor}: {e}")
+
+        # If we get here, all neighbors voted for us
+        await self.notify_leadership()
+
+
+    async def monitor_trigger_election(self):
+        while True:
+            if self.should_trigger_election():
+                await self.handle_trigger_election()
+
+            await asyncio.sleep(1)
+
+
+    def create_election_tasks(self):
+        should_trigger_election_task = asyncio.create_task(self.monitor_trigger_election())
+        return [should_trigger_election_task]
+
+
+    async def notify_leadership(self):
+        request = block_chain_pb2.NotifyLeadershipRequest(address=self.address)
+
+        for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+            if not heartbeat_data['is_valid']:
+                continue
+
+            try:
+                async with grpc.aio.insecure_channel(neighbor) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                    response = await stub.NotifyLeadership(request)
+                    print(f"notify_leadership response received from {neighbor}: {response}")
+
+            except Exception as e:
+                print(f"An error occurred while notifying leadership to {neighbor}: {e}")
+
+        self.is_leader = True
+        self.current_leader = self.address
+
 
     def create_block(self, audits, merkle_tree):
         if len(self.blocks) == 0:
@@ -265,7 +408,7 @@ class FullNode():
                 pass
 
             if len(self.mem_pool) >= BLOCK_SIZE:
-                if self.leader:
+                if self.is_leader:
                     print("Queue has reached BLOCK_SIZE, processing the queue ...")
 
                     new_block, grpc_block, block_proposal_accepted = await self.propose_block()
@@ -273,7 +416,8 @@ class FullNode():
                         await self.broadcast_commit_block(new_block, grpc_block)
                         await self.commit_block(grpc_block)
 
-            # Save block to disk
+
+    # Save block to disk
     def save_block_to_disk(self, block, path="./blocks"):
         os.makedirs(path, exist_ok=True)
         if not block.id:
@@ -285,6 +429,7 @@ class FullNode():
         with open(file_path, 'w') as f:
             json.dump(block_dict, f, indent=4)
         print(f"Block {block_number} saved to: {file_path}")
+
 
     # Load blocks from disk
     def load_blocks_from_disk(self, path="./blocks"):
@@ -328,11 +473,12 @@ class FullNode():
         print(f"Loaded {len(blocks)} block(s) from disk.")
         return blocks
 
+
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
-    
 
     def __init__(self,full_node):
         self.full_node = full_node
+
 
     async def SubmitAudit(self, request, context):
         print(f"SubmitAudit {request.req_id}")
@@ -367,6 +513,7 @@ class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
 
 
 class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
+
     def __init__(self,full_node):
         self.full_node = full_node
 
@@ -382,6 +529,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
         await full_node.request_queue.put(request)
         return block_chain_pb2.WhisperResponse(status="success")
+
 
     async def ProposeBlock(self, block, context):
         print(f"ProposeBlock: {block.hash}")
@@ -460,8 +608,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         vote=False,
                         status="failure",
                         error_message=f"Failed to verify audit {audit}")
-                    
-        
+
         merkle_tree = MerkleTree(block.audits)
 
         if merkle_tree.root != block.merkle_root:
@@ -476,7 +623,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
         # Create new block in the chain
         new_block = self.full_node.create_block(block.audits, merkle_tree)
-        
+
         if new_block.hash != block.hash:
             error_message = f"Block hash {block.hash} does not match expected hash {new_block.hash}"
             print(error_message)
@@ -485,13 +632,12 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         status="failure",
                         error_message=error_message)
 
-        
-
         # Save updated audit hashes after successful validation
         if hasattr(self, 'save_audit_hashes'):
             self.save_audit_hashes()
 
         return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
+
 
     async def CommitBlock(self, block, context):
         print(f"CommitBlock: {block.hash}")
@@ -505,7 +651,8 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         await self.full_node.commit_block(block)
 
         return block_chain_pb2.BlockCommitResponse(status="success")
-    
+
+
     def save_audit_hashes(self):
         """Save audit hashes to disk"""
         try:
@@ -530,6 +677,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
             print(f"Error loading audit hashes: {e}")
             self.audit_hash_store = {}
 
+
     async def GetBlock(self, request, context):
         if request.id < len(self.full_node.blocks):
             block = self.full_node.blocks[request.id]
@@ -547,9 +695,57 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
 
     async def SendHeartbeat(self, request, context):
-        HEARTBEATS_MAP[request.from_address] = (time.time(), request)
         print(f"SendHeartbeat received heartbeat from {request.from_address} with mem_pool {request.mem_pool_size} and latest_block_id {request.latest_block_id}")
+
+        if request.from_address not in HEARTBEATS_MAP:
+            HEARTBEATS_MAP[request.from_address] = {}
+
+        heartbeat_data = HEARTBEATS_MAP[request.from_address]
+        heartbeat_data['time'] = time.time()
+        heartbeat_data['is_valid'] = True
+        heartbeat_data['request'] = request
+
+        if self.full_node.current_leader is None:
+            if request.current_leader_address:
+                print(f"Accepting {request.current_leader_address} as current leader")
+                self.full_node.current_leader = request.current_leader_address
+
         return block_chain_pb2.HeartbeatResponse(status="success")
+
+
+    async def TriggerElection(self, request, context):
+        print(f"Election triggered by neighbor! {request}")
+        if not request.address:
+            return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message="request.address is empty")
+
+        if request.address not in HEARTBEATS_MAP:
+            return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message=f"{request.address} not in heartbeat map")
+
+        heartbeat_data = HEARTBEATS_MAP[request.address]
+        if not heartbeat_data['is_valid']:
+            return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message=f"{request.address} has not sent recent heartbeats")
+
+        best_neighbor = self.full_node.get_best_server_to_elect()
+        if request.address != best_neighbor:
+            return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message=f"better neighbor {best_neighbor} should be elected")
+
+        print(f"Voting for {request.address}!")
+        return block_chain_pb2.TriggerElectionResponse(vote=True, status="success")
+
+
+    async def NotifyLeadership(self, request, context):
+        print(f"Notified of Leadership by neighbor! {request}")
+
+        if not request.address:
+            return block_chain_pb2.NotifyLeadershipResponse(status="failure", error_message="request.address is empty")
+
+        if request.address not in HEARTBEATS_MAP:
+            return block_chain_pb2.NotifyLeadershipResponse(status="failure", error_message=f"{request.address} not in heartbeat map")
+
+        self.full_node.is_leader = False
+        self.full_node.current_leader = request.address
+
+        return block_chain_pb2.NotifyLeadershipResponse(status="success")
 
 
 async def serve(full_node):
@@ -563,8 +759,8 @@ async def serve(full_node):
     print("Server started on port ", full_node.port)
 
     heartbeat_tasks = full_node.create_heartbeat_tasks()
-    monitor_task = full_node.create_monitor_task()
-    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks, monitor_task)
+    election_tasks = full_node.create_election_tasks()
+    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks, *election_tasks)
     await server.wait_for_termination()
 
 
@@ -591,6 +787,6 @@ if __name__ == '__main__':
     full_node = FullNode(args, config)
 
     print(full_node.port)
-    print(full_node.leader)
+    print(full_node.is_leader)
 
     asyncio.run(serve(full_node))
