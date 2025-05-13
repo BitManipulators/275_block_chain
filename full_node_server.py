@@ -36,7 +36,7 @@ class FullNode():
         self.leader = args.is_leader
         self.address = args.ip + ":" + str(args.port)
         self.neighbors = [server['address'] for server in config['servers'] if server['address'] != self.address]
-        self.current_leader = None
+        self.audit_hash_store = {}
         print(f"Neighbors: {self.neighbors}")
 
 
@@ -273,8 +273,63 @@ class FullNode():
                         await self.broadcast_commit_block(new_block, grpc_block)
                         await self.commit_block(grpc_block)
 
+            # Save block to disk
+    def save_block_to_disk(self, block, path="./blocks"):
+        os.makedirs(path, exist_ok=True)
+        if not block.id:
+            block.id = 0
+        block_dict = MessageToDict(block, preserving_proto_field_name=True)
+        block_number = block.id
+
+        file_path = os.path.join(path, f"block_{block_number}.json")
+        with open(file_path, 'w') as f:
+            json.dump(block_dict, f, indent=4)
+        print(f"Block {block_number} saved to: {file_path}")
+
+    # Load blocks from disk
+    def load_blocks_from_disk(self, path="./blocks"):
+        blocks = []
+        if os.path.exists(path):
+            for fname in sorted(os.listdir(path)):
+                if fname.endswith(".json"):
+                    with open(os.path.join(path, fname)) as f:
+                        block_dict = json.load(f)
+                        print(f"[DEBUG] Loading block from {fname}: {block_dict}")
+
+                        if 'index' not in block_dict:
+                            try:
+                                block_num = int(fname.split('_')[1].split('.')[0])
+                                block_dict['index'] = block_num
+                                print(f"Added missing index {block_num} from filename")
+                            except (IndexError, ValueError):
+                                block_dict['index'] = len(blocks)
+                                print(f"Added missing index {len(blocks)} based on block count")
+
+                        if 'previous_hash' not in block_dict:
+                            # Default value for the first block or missing hash
+                            block_dict['previous_hash'] = "0"
+                            print(f"Added default previous_hash: 0")
+
+                        if 'audits' not in block_dict:
+                            # Default to an empty list if audits are missing
+                            block_dict['audits'] = []
+                            print(f"Added default audits: []")
+
+                        # Create a Block instance with the required fields
+                        block = Block(
+                            index=block_dict['index'],
+                            previous_hash=block_dict['previous_hash'],
+                            audits=block_dict['audits'],
+                            merkle_root=block_dict.get('merkle_root'),
+                            timestamp=block_dict.get('timestamp'),
+                            hash=block_dict.get('hash')
+                        )
+                        blocks.append(block)
+        print(f"Loaded {len(blocks)} block(s) from disk.")
+        return blocks
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
+    
 
     def __init__(self,full_node):
         self.full_node = full_node
@@ -328,17 +383,74 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         await full_node.request_queue.put(request)
         return block_chain_pb2.WhisperResponse(status="success")
 
-
     async def ProposeBlock(self, block, context):
         print(f"ProposeBlock: {block.hash}")
 
-        if not self.full_node.verify_previous_block_hash(block):
-            return block_chain_pb2.BlockVoteResponse(
-                vote=False,
-                status="failure",
-                error_message="Previous block hash does not match"
-            )
+        # Initialize audit_hash_store if it doesn't exist
+        if not hasattr(self, 'audit_hash_store'):
+            self.audit_hash_store = {}
 
+        # # Verify chain integrity
+        # if not self.full_node.verify_previous_block_hash(block):
+        #     return block_chain_pb2.BlockVoteResponse(
+        #         vote=False,
+        #         status="failure",
+        #         error_message="Previous block hash does not match"
+        #     )
+
+        # # Verify Merkle root integrity
+        # audits = block.audits
+        # if audits:
+        #     print(f"Processing {len(audits)} audits:")
+        #     for i, audit in enumerate(audits):
+        #         # Get audit details
+        #         req_id = audit.req_id if hasattr(audit, 'req_id') else 'N/A'
+        #         print(f"Audit #{i}:")
+        #         print(f"Req ID: {req_id}")
+
+        #         # If audit has file_info
+        #         if hasattr(audit, 'file_info'):
+        #             print(f"File: {audit.file_info.file_name if hasattr(audit.file_info, 'file_name') else 'N/A'}")
+
+        #         # If audit has user_info
+        #         if hasattr(audit, 'user_info'):
+        #             print(f"User: {audit.user_info.user_name if hasattr(audit.user_info, 'user_name') else 'N/A'}")
+
+        #         # Calculate the hash of the audit
+        #         audit_hash = MerkleTree.sha256(audit)
+        #         print(f"Hash: {audit_hash}")
+
+        #         # Check for tampering if this is not a new audit
+        #         if req_id != 'N/A' and req_id in self.audit_hash_store:
+        #             stored_hash = self.audit_hash_store[req_id]
+        #             if stored_hash != audit_hash:
+        #                 print(f"TAMPERING DETECTED for audit {req_id}")
+        #                 print(f"  Stored hash: {stored_hash}")
+        #                 print(f"  Current hash: {audit_hash}")
+        #                 return block_chain_pb2.BlockVoteResponse(
+        #                     vote=False,
+        #                     status="failure",
+        #                     error_message=f"Audit {req_id} has been tampered with"
+        #                 )
+        #             else:
+        #                 print(f"Integrity verified for audit {req_id}")
+        #         elif req_id != 'N/A':
+        #             # First time seeing this audit, store its hash
+        #             self.audit_hash_store[req_id] = audit_hash
+        #             print(f"New audit stored with hash: {audit_hash}")
+
+        #     # Calculate and verify Merkle root
+        #     merkle_tree = MerkleTree(audits)
+        #     calculated_root = merkle_tree.root
+        #     print(f"Calculated Merkle root: {calculated_root}")
+        #     if calculated_root != block.merkle_root:
+        #         return block_chain_pb2.BlockVoteResponse(
+        #             vote=False,
+        #             status="failure",
+        #             error_message=f"Invalid Merkle root: expected {calculated_root}, got {block.merkle_root}"
+        #         )
+
+        # Verify audit signatures
         for audit in block.audits:
             if audit not in self.full_node.mem_pool:
                 # Fallback to verifying audit signatures
@@ -349,8 +461,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         status="failure",
                         error_message=f"Failed to verify audit {audit}")
                     
-        # TODO: check current block hash
-        # create merkle tree
+        
         merkle_tree = MerkleTree(block.audits)
 
         if merkle_tree.root != block.merkle_root:
@@ -374,8 +485,13 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         status="failure",
                         error_message=error_message)
 
-        return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
+        
 
+        # Save updated audit hashes after successful validation
+        if hasattr(self, 'save_audit_hashes'):
+            self.save_audit_hashes()
+
+        return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
 
     async def CommitBlock(self, block, context):
         print(f"CommitBlock: {block.hash}")
@@ -389,7 +505,30 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         await self.full_node.commit_block(block)
 
         return block_chain_pb2.BlockCommitResponse(status="success")
+    
+    def save_audit_hashes(self):
+        """Save audit hashes to disk"""
+        try:
+            import json
+            with open('audit_hashes.json', 'w') as f:
+                json.dump(self.audit_hash_store, f)
+            print(f"Saved {len(self.audit_hash_store)} audit hashes to disk")
+        except Exception as e:
+            print(f"Error saving audit hashes: {e}")
 
+    def load_audit_hashes(self):
+        """Load audit hashes from disk"""
+        try:
+            import json
+            with open('audit_hashes.json', 'r') as f:
+                self.audit_hash_store = json.load(f)
+            print(f"Loaded {len(self.audit_hash_store)} audit hashes from disk")
+        except FileNotFoundError:
+            self.audit_hash_store = {}
+            print("No stored audit hashes found, starting fresh")
+        except Exception as e:
+            print(f"Error loading audit hashes: {e}")
+            self.audit_hash_store = {}
 
     async def GetBlock(self, request, context):
         if request.id < len(self.full_node.blocks):
