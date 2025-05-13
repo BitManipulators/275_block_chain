@@ -21,8 +21,8 @@ from google.protobuf import empty_pb2
 
 
 BLOCK_SIZE = 1
-HEARTBEAT_INTERVAL_SECONDS = 2
-HEARTBEAT_TIMEOUT_THRESHOLD_SECONDS = 7
+HEARTBEAT_INTERVAL_SECONDS = 10
+HEARTBEAT_TIMEOUT_THRESHOLD_SECONDS = 15
 
 AUDIT_REQUESTS_MAP = {}
 HEARTBEATS_MAP = {}
@@ -39,7 +39,6 @@ class FullNode():
         self.address = args.ip + ":" + str(args.port)
         self.neighbors = [server['address'] for server in config['servers'] if server['address'] != self.address]
         self.audit_hash_store = {}
-        self.term = 0
         print(f"Neighbors: {self.neighbors}")
 
 
@@ -48,7 +47,7 @@ class FullNode():
             for neighbor in self.neighbors:
                 heartbeat_request = block_chain_pb2.HeartbeatRequest(
                     from_address=self.address,
-                    current_leader_address=self.address if self.is_leader else "",
+                    current_leader_address=self.current_leader if self.current_leader else "",
                     latest_block_id=len(self.blocks) - 1,
                     mem_pool_size=len(self.mem_pool),
                 )
@@ -74,6 +73,7 @@ class FullNode():
         monitor_missed_heartbeats_task = asyncio.create_task(self.monitor_missed_heartbeats())
 
         return [send_heartbeats_task, monitor_heartbeat_latest_block_task, monitor_missed_heartbeats_task]
+        #return [send_heartbeats_task, monitor_missed_heartbeats_task]
 
 
     async def synchronize_blocks(self, latest_block_id,neighbor_address):
@@ -103,15 +103,18 @@ class FullNode():
 
     async def monitor_heartbeat_latest_blocks(self):
         while True:
-            for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
-                if not heartbeat_data['is_valid']:
-                    continue
+            try:
+                for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
+                    if not heartbeat_data['is_valid']:
+                        continue
 
-                other_latest_block_id = heartbeat_data['request'].latest_block_id
-                if not self.is_leader:
-                    local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks) - 1
-                    if local_last_block_id < other_latest_block_id:
-                        await self.synchronize_blocks(other_latest_block_id, neighbor)
+                    other_latest_block_id = heartbeat_data['request'].latest_block_id
+                    if not self.is_leader:
+                        local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks) - 1
+                        if local_last_block_id < other_latest_block_id:
+                            await self.synchronize_blocks(other_latest_block_id, neighbor)
+            except Exception as e:
+                print(f"monitor_heartbeat_latest_blocks an error occurred monitoring heartbeats: {e}")
 
             await asyncio.sleep(2)
 
@@ -174,7 +177,7 @@ class FullNode():
         best_server_address = self.get_best_server_to_elect()
 
         if self.current_leader is None:
-            if num_alive_neighbors > 1: # TODO: consider larger number of alive neighbors before triggering election?
+            if num_alive_neighbors > 0: # TODO: consider larger number of alive neighbors before triggering election?
                 if best_server_address == self.address:
                     return True
         else:
@@ -188,9 +191,10 @@ class FullNode():
 
 
     async def handle_trigger_election(self):
-        self.term += 1
-        request = block_chain_pb2.TriggerElectionRequest(term=self.term, address=self.address)
+        request = block_chain_pb2.TriggerElectionRequest(address=self.address)
 
+        votes = 0
+        voted_neighbors = 0
         for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
             if not heartbeat_data['is_valid']:
                 continue
@@ -201,20 +205,18 @@ class FullNode():
                     response = await stub.TriggerElection(request)
                     print(f"trigger_election response received from {neighbor}: {response}")
 
-                    # If any server has a higher term number, update our term and cancel our election
-                    if response.term > self.term:
-                        self.term = response.term
-                        return
+                    voted_neighbors += 1
 
                     # Count vote if vote true
-                    if not response.vote:
-                        return
+                    if response.vote:
+                        votes += 1
 
             except Exception as e:
                 print(f"An error occurred while triggering election to {neighbor}: {e}")
 
         # If we get here, all neighbors voted for us
-        await self.notify_leadership()
+        if votes >= (voted_neighbors // 2) + 1:
+            await self.notify_leadership()
 
 
     async def monitor_trigger_election(self):
@@ -222,7 +224,7 @@ class FullNode():
             if self.should_trigger_election():
                 await self.handle_trigger_election()
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
 
 
     def create_election_tasks(self):
@@ -695,7 +697,7 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
 
     async def SendHeartbeat(self, request, context):
-        print(f"SendHeartbeat received heartbeat from {request.from_address} with mem_pool {request.mem_pool_size} and latest_block_id {request.latest_block_id}")
+        print(f"SendHeartbeat received heartbeat from {request.from_address} with mem_pool {request.mem_pool_size} and latest_block_id {request.latest_block_id} and current leader {request.current_leader_address}")
 
         if request.from_address not in HEARTBEATS_MAP:
             HEARTBEATS_MAP[request.from_address] = {}
@@ -707,14 +709,16 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
         if self.full_node.current_leader is None:
             if request.current_leader_address:
-                print(f"Accepting {request.current_leader_address} as current leader")
-                self.full_node.current_leader = request.current_leader_address
+                if request.current_leader_address in HEARTBEATS_MAP and HEARTBEATS_MAP[request.current_leader_address]['is_valid']:
+                    print(f"Accepting {request.current_leader_address} as current leader")
+                    self.full_node.current_leader = request.current_leader_address
 
         return block_chain_pb2.HeartbeatResponse(status="success")
 
 
     async def TriggerElection(self, request, context):
         print(f"Election triggered by neighbor! {request}")
+
         if not request.address:
             return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message="request.address is empty")
 
@@ -726,6 +730,8 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
             return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message=f"{request.address} has not sent recent heartbeats")
 
         best_neighbor = self.full_node.get_best_server_to_elect()
+        print(f"{request.address} is asking for vote, best neighbor is {best_neighbor}")
+
         if request.address != best_neighbor:
             return block_chain_pb2.TriggerElectionResponse(vote=False, status="failure", error_message=f"better neighbor {best_neighbor} should be elected")
 
