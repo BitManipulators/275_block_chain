@@ -69,11 +69,11 @@ class FullNode():
 
     def create_heartbeat_tasks(self):
         send_heartbeats_task = asyncio.create_task(self.send_heartbeats())
-        monitor_heartbeat_latest_block_task = asyncio.create_task(self.monitor_heartbeat_latest_blocks())
+        #monitor_heartbeat_latest_block_task = asyncio.create_task(self.monitor_heartbeat_latest_blocks())
         monitor_missed_heartbeats_task = asyncio.create_task(self.monitor_missed_heartbeats())
 
-        return [send_heartbeats_task, monitor_heartbeat_latest_block_task, monitor_missed_heartbeats_task]
-        #return [send_heartbeats_task, monitor_missed_heartbeats_task]
+        #return [send_heartbeats_task, monitor_heartbeat_latest_block_task, monitor_missed_heartbeats_task]
+        return [send_heartbeats_task, monitor_missed_heartbeats_task]
 
 
     async def synchronize_blocks(self, latest_block_id,neighbor_address):
@@ -94,7 +94,7 @@ class FullNode():
                           previous_hash=grpc_block.previous_hash,
                           audits=grpc_block.audits,
                           merkle_root=grpc_block.merkle_root)
-                    self.blocks.append(block)
+                    self.append_block(block)
                     current_block_id += 1
             except Exception as e:
                 print(f"synchronize_blocks an error occurred sending to {neighbor_address}: {e}")
@@ -220,6 +220,8 @@ class FullNode():
 
 
     async def monitor_trigger_election(self):
+        await asyncio.sleep(15)
+
         while True:
             if self.should_trigger_election():
                 await self.handle_trigger_election()
@@ -313,7 +315,8 @@ class FullNode():
         for audit in grpc_block.audits:
             if audit.req_id in AUDIT_REQUESTS_MAP:
                 future = AUDIT_REQUESTS_MAP[audit.req_id]
-                future.set_result(new_block)
+                if not future.done():
+                    future.set_result(new_block)
                 del AUDIT_REQUESTS_MAP[audit.req_id]
 
 
