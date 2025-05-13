@@ -161,7 +161,7 @@ class FullNode():
 
 
     def should_trigger_election(self):
-        print(self.current_leader)
+        #print(self.current_leader)
 
         if self.is_leader:
             return False
@@ -174,7 +174,7 @@ class FullNode():
         best_server_address = self.get_best_server_to_elect()
 
         if self.current_leader is None:
-            if num_alive_neighbors > 0: # TODO: consider larger number of alive neighbors before triggering election?
+            if num_alive_neighbors > 1: # TODO: consider larger number of alive neighbors before triggering election?
                 if best_server_address == self.address:
                     return True
         else:
