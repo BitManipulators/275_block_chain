@@ -1,7 +1,7 @@
 servers:
-#  - address: 0.0.0.0:50051
-#  - address: 169.254.53.212:50051 #serhat
-#  - address: 169.254.13.100:50051   #yash
+  - address: 127.0.0.1:50051
+  - address: 127.0.0.1:50052 #serhat
+  - address: 127.0.0.1:50053   #yash
 #  - address: 169.254.183.161:50051   #harsha
 #  - address: 169.254.47.230:50051   #ronak
-  - address: 169.254.122.113:50052   #sameer
+  # - address: 169.254.122.113:50052   #sameer
