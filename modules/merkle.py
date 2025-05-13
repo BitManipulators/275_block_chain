@@ -1,5 +1,7 @@
 import hashlib 
 
+from modules.signature import create_string
+
 class MerkleTree :
     def __init__(self,audits):
         self.levels , self.root = MerkleTree.build_merkle_tree(audits)
@@ -43,7 +45,9 @@ class MerkleTree :
     def build_merkle_tree(audits):
         
         levels = []
-        current_level = [MerkleTree.sha256(audit) for audit in audits]
+        audit_strings = [
+            create_string(audit.req_id,audit.file_info,audit.user_info,audit.access_type,audit.timestamp) for audit in audits]
+        current_level = [MerkleTree.sha256(audit_string) for audit_string in audit_strings]
         levels.append(current_level)
         
         while len(current_level) > 1 :

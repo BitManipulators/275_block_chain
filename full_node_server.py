@@ -50,17 +50,18 @@ class FullNode():
                     mem_pool_size=len(self.mem_pool),
                 )
 
-                print(f"{self.address}: {len(self.blocks)} and {len(self.mem_pool)}")
-                print(heartbeat_request)
+                #print(f"{self.address}: block size : {len(self.blocks)} and mem_pool size {len(self.mem_pool)}")
+                #print(heartbeat_request)
 
                 try:
                     async with grpc.aio.insecure_channel(neighbor) as channel:
                         stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
                         heartbeat_response = await stub.SendHeartbeat(heartbeat_request)
-                        if heartbeat_response.error_message:
-                            print(f"send_heartbeats an error_message from {neighbor}: heartbeat_response.error_message")
+                        #if heartbeat_response.error_message:
+                        #    print(f"send_heartbeats an error_message from {neighbor}: heartbeat_response.error_message")
                 except Exception as e:
-                    print(f"send_heartbeats an error occurred sending to {neighbor}: {e}")
+                    pass
+                    #print(f"send_heartbeats an error occurred sending to {neighbor}: {e}")
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
 
@@ -68,10 +69,47 @@ class FullNode():
         send_heartbeats_task = asyncio.create_task(self.send_heartbeats())
         return [send_heartbeats_task]
 
+    async def synchronize_blocks(self, latest_block_id,neighbor_address):
+        print(f"synchronize_blocks latest_block_id : {latest_block_id} neighbor_address : {neighbor_address}")
+        current_block_id = -1 if len(self.blocks) == 0 else (len(self.blocks)-1)
+        while current_block_id < latest_block_id :
+            getblock_request = block_chain_pb2.GetBlockRequest(id=current_block_id+1)
+            try:
+                async with grpc.aio.insecure_channel(neighbor_address) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                    get_block_response = await stub.GetBlock(getblock_request)
+                    if get_block_response.error_message:
+                        print(f"synchronize_blocks an error_message from {neighbor_address}: heartbeat_response.error_message")
+                        break
+                    grpc_block = get_block_response.block
+                    block = Block(index=grpc_block.id,
+                          hash=grpc_block.hash,
+                          previous_hash=grpc_block.previous_hash,
+                          audits=grpc_block.audits,
+                          merkle_root=grpc_block.merkle_root)
+                    self.blocks.append(block)
+                    current_block_id += 1
+            except Exception as e:
+                print(f"synchronize_blocks an error occurred sending to {neighbor_address}: {e}")
+                break
+    async def monitor_heartbeats(self):
+        while True :
+            for neighbor in self.neighbors:
+                if neighbor in HEARTBEATS_MAP :
+                    last_time, heart_beat_info = HEARTBEATS_MAP[neighbor]
+                    other_latest_block_id = heart_beat_info.latest_block_id
+                    if  not self.leader :
+                        local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks)-1
+                        if local_last_block_id <  other_latest_block_id :
+                            await self.synchronize_blocks(other_latest_block_id,neighbor)
+            await asyncio.sleep(2)
+    async def create_monitor_task(self):
+        monitor_task = asyncio.create_task(self.monitor_heartbeats())
+        return monitor_task
 
     def create_block(self, audits, merkle_tree):
         if len(self.blocks) == 0:
-            previous_hash = ""
+            previous_hash = "genesis"
             index = 0
         else:
             last_block = self.blocks[-1]
@@ -89,7 +127,7 @@ class FullNode():
     def verify_previous_block_hash(self, block):
         # Check for the last stored hash and prev hash from the request
         if len(self.blocks) == 0:
-            previous_block_hash = ""
+            previous_block_hash = "genesis"
         else:
             previous_block_hash = self.blocks[-1].hash
 
@@ -291,6 +329,7 @@ class FullNode():
         return blocks
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
+    
 
     def __init__(self,full_node):
         self.full_node = full_node
@@ -351,65 +390,65 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
         if not hasattr(self, 'audit_hash_store'):
             self.audit_hash_store = {}
 
-        # Verify chain integrity
-        if not self.full_node.verify_previous_block_hash(block):
-            return block_chain_pb2.BlockVoteResponse(
-                vote=False,
-                status="failure",
-                error_message="Previous block hash does not match"
-            )
+        # # Verify chain integrity
+        # if not self.full_node.verify_previous_block_hash(block):
+        #     return block_chain_pb2.BlockVoteResponse(
+        #         vote=False,
+        #         status="failure",
+        #         error_message="Previous block hash does not match"
+        #     )
 
-        # Verify Merkle root integrity
-        audits = block.audits
-        if audits:
-            print(f"Processing {len(audits)} audits:")
-            for i, audit in enumerate(audits):
-                # Get audit details
-                req_id = audit.req_id if hasattr(audit, 'req_id') else 'N/A'
-                print(f"Audit #{i}:")
-                print(f"Req ID: {req_id}")
+        # # Verify Merkle root integrity
+        # audits = block.audits
+        # if audits:
+        #     print(f"Processing {len(audits)} audits:")
+        #     for i, audit in enumerate(audits):
+        #         # Get audit details
+        #         req_id = audit.req_id if hasattr(audit, 'req_id') else 'N/A'
+        #         print(f"Audit #{i}:")
+        #         print(f"Req ID: {req_id}")
 
-                # If audit has file_info
-                if hasattr(audit, 'file_info'):
-                    print(f"File: {audit.file_info.file_name if hasattr(audit.file_info, 'file_name') else 'N/A'}")
+        #         # If audit has file_info
+        #         if hasattr(audit, 'file_info'):
+        #             print(f"File: {audit.file_info.file_name if hasattr(audit.file_info, 'file_name') else 'N/A'}")
 
-                # If audit has user_info
-                if hasattr(audit, 'user_info'):
-                    print(f"User: {audit.user_info.user_name if hasattr(audit.user_info, 'user_name') else 'N/A'}")
+        #         # If audit has user_info
+        #         if hasattr(audit, 'user_info'):
+        #             print(f"User: {audit.user_info.user_name if hasattr(audit.user_info, 'user_name') else 'N/A'}")
 
-                # Calculate the hash of the audit
-                audit_hash = MerkleTree.sha256(audit)
-                print(f"Hash: {audit_hash}")
+        #         # Calculate the hash of the audit
+        #         audit_hash = MerkleTree.sha256(audit)
+        #         print(f"Hash: {audit_hash}")
 
-                # Check for tampering if this is not a new audit
-                if req_id != 'N/A' and req_id in self.audit_hash_store:
-                    stored_hash = self.audit_hash_store[req_id]
-                    if stored_hash != audit_hash:
-                        print(f"TAMPERING DETECTED for audit {req_id}")
-                        print(f"  Stored hash: {stored_hash}")
-                        print(f"  Current hash: {audit_hash}")
-                        return block_chain_pb2.BlockVoteResponse(
-                            vote=False,
-                            status="failure",
-                            error_message=f"Audit {req_id} has been tampered with"
-                        )
-                    else:
-                        print(f"Integrity verified for audit {req_id}")
-                elif req_id != 'N/A':
-                    # First time seeing this audit, store its hash
-                    self.audit_hash_store[req_id] = audit_hash
-                    print(f"New audit stored with hash: {audit_hash}")
+        #         # Check for tampering if this is not a new audit
+        #         if req_id != 'N/A' and req_id in self.audit_hash_store:
+        #             stored_hash = self.audit_hash_store[req_id]
+        #             if stored_hash != audit_hash:
+        #                 print(f"TAMPERING DETECTED for audit {req_id}")
+        #                 print(f"  Stored hash: {stored_hash}")
+        #                 print(f"  Current hash: {audit_hash}")
+        #                 return block_chain_pb2.BlockVoteResponse(
+        #                     vote=False,
+        #                     status="failure",
+        #                     error_message=f"Audit {req_id} has been tampered with"
+        #                 )
+        #             else:
+        #                 print(f"Integrity verified for audit {req_id}")
+        #         elif req_id != 'N/A':
+        #             # First time seeing this audit, store its hash
+        #             self.audit_hash_store[req_id] = audit_hash
+        #             print(f"New audit stored with hash: {audit_hash}")
 
-            # Calculate and verify Merkle root
-            merkle_tree = MerkleTree(audits)
-            calculated_root = merkle_tree.root
-            print(f"Calculated Merkle root: {calculated_root}")
-            if calculated_root != block.merkle_root:
-                return block_chain_pb2.BlockVoteResponse(
-                    vote=False,
-                    status="failure",
-                    error_message=f"Invalid Merkle root: expected {calculated_root}, got {block.merkle_root}"
-                )
+        #     # Calculate and verify Merkle root
+        #     merkle_tree = MerkleTree(audits)
+        #     calculated_root = merkle_tree.root
+        #     print(f"Calculated Merkle root: {calculated_root}")
+        #     if calculated_root != block.merkle_root:
+        #         return block_chain_pb2.BlockVoteResponse(
+        #             vote=False,
+        #             status="failure",
+        #             error_message=f"Invalid Merkle root: expected {calculated_root}, got {block.merkle_root}"
+        #         )
 
         # Verify audit signatures
         for audit in block.audits:
@@ -421,6 +460,32 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         vote=False,
                         status="failure",
                         error_message=f"Failed to verify audit {audit}")
+                    
+        
+        merkle_tree = MerkleTree(block.audits)
+
+        if merkle_tree.root != block.merkle_root:
+            error_message = f"Merkle root {block.merkle_root} does not match expected merkle root {merkle_tree.root}"
+            print(error_message)
+            return block_chain_pb2.BlockVoteResponse(
+                        vote=False,
+                        status="failure",
+                        error_message=error_message)
+        else:
+            print(f"Merkle roots match {merkle_tree.root}!!")
+
+        # Create new block in the chain
+        new_block = self.full_node.create_block(block.audits, merkle_tree)
+        
+        if new_block.hash != block.hash:
+            error_message = f"Block hash {block.hash} does not match expected hash {new_block.hash}"
+            print(error_message)
+            return block_chain_pb2.BlockVoteResponse(
+                        vote=False,
+                        status="failure",
+                        error_message=error_message)
+
+        
 
         # Save updated audit hashes after successful validation
         if hasattr(self, 'save_audit_hashes'):
@@ -428,6 +493,19 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
 
         return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
 
+    async def CommitBlock(self, block, context):
+        print(f"CommitBlock: {block.hash}")
+
+        if not self.full_node.verify_previous_block_hash(block):
+            return block_chain_pb2.BlockCommitResponse(
+                status="failure",
+                error_message="Previous block hash does not match"
+            )
+
+        await self.full_node.commit_block(block)
+
+        return block_chain_pb2.BlockCommitResponse(status="success")
+    
     def save_audit_hashes(self):
         """Save audit hashes to disk"""
         try:
@@ -485,7 +563,8 @@ async def serve(full_node):
     print("Server started on port ", full_node.port)
 
     heartbeat_tasks = full_node.create_heartbeat_tasks()
-    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks)
+    monitor_task = full_node.create_monitor_task()
+    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks, monitor_task)
     await server.wait_for_termination()
 
 

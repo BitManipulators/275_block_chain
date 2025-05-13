@@ -1,6 +1,7 @@
 import time
 import hashlib
 from modules.merkle import MerkleTree
+from modules.signature import create_string
 
 class Block :
     
@@ -13,8 +14,10 @@ class Block :
         self.hash = hash if hash else self.compute_hash()
     
     def compute_hash(self):
-        block_string = f"{self.index}{self.previous_hash},{self.audits},{self.timestamp},{self.merkle_root}"
-        return hashlib.sha256(block_string.encode()).hexdigest() 
+        audit_strings = "".join([create_string(audit.req_id,audit.file_info,audit.user_info,audit.access_type,audit.timestamp) for audit in self.audits])
+        block_string = f"{self.index}{self.previous_hash}{self.merkle_root}{audit_strings}"
+        print(block_string)
+        return hashlib.sha256(block_string.encode()).hexdigest()
     
     def get_merkle_root(self):
         
