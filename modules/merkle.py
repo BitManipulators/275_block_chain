@@ -1,5 +1,7 @@
 import hashlib 
 
+from modules.signature import create_string
+
 class MerkleTree :
     def __init__(self,audits):
         self.levels , self.root = MerkleTree.build_merkle_tree(audits)
@@ -43,7 +45,11 @@ class MerkleTree :
     def build_merkle_tree(audits):
         
         levels = []
-        current_level = [MerkleTree.sha256(audit) for audit in audits]
+        audit_strings = [
+            create_string(audit.req_id,audit.file_info,audit.user_info,audit.access_type,audit.timestamp) for audit in audits]
+        current_level = [MerkleTree.sha256(audit_string) for audit_string in audit_strings]
+        print(audit_strings)
+        print(current_level)
         levels.append(current_level)
         
         while len(current_level) > 1 :
@@ -53,8 +59,11 @@ class MerkleTree :
             
             next_level = []
             for i in range(0,len(current_level),2):
+                print(f"left : {current_level[i]}")
+                print(f"right : {current_level[i+1]}")
                 combined = current_level[i] + current_level[i+1]
                 next_level.append(MerkleTree.sha256(combined))
+                print(f"Combined Hash - {MerkleTree.sha256(combined)}")
             
             current_level = next_level
             levels.append(current_level)    

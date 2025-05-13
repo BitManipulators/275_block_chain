@@ -21,7 +21,7 @@ from google.protobuf import empty_pb2
 
 
 BLOCK_SIZE = 1
-HEARTBEAT_INTERVAL_SECONDS = 2
+HEARTBEAT_INTERVAL_SECONDS = 10
 
 AUDIT_REQUESTS_MAP = {}
 HEARTBEATS_MAP = {}
@@ -36,6 +36,7 @@ class FullNode():
         self.leader = args.is_leader
         self.address = args.ip + ":" + str(args.port)
         self.neighbors = [server['address'] for server in config['servers'] if server['address'] != self.address]
+        self.current_leader = None
         print(f"Neighbors: {self.neighbors}")
 
 
@@ -49,17 +50,18 @@ class FullNode():
                     mem_pool_size=len(self.mem_pool),
                 )
 
-                print(f"{self.address}: {len(self.blocks)} and {len(self.mem_pool)}")
-                print(heartbeat_request)
+                #print(f"{self.address}: block size : {len(self.blocks)} and mem_pool size {len(self.mem_pool)}")
+                #print(heartbeat_request)
 
                 try:
                     async with grpc.aio.insecure_channel(neighbor) as channel:
                         stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
                         heartbeat_response = await stub.SendHeartbeat(heartbeat_request)
-                        if heartbeat_response.error_message:
-                            print(f"send_heartbeats an error_message from {neighbor}: heartbeat_response.error_message")
+                        #if heartbeat_response.error_message:
+                        #    print(f"send_heartbeats an error_message from {neighbor}: heartbeat_response.error_message")
                 except Exception as e:
-                    print(f"send_heartbeats an error occurred sending to {neighbor}: {e}")
+                    pass
+                    #print(f"send_heartbeats an error occurred sending to {neighbor}: {e}")
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
 
@@ -67,10 +69,47 @@ class FullNode():
         send_heartbeats_task = asyncio.create_task(self.send_heartbeats())
         return [send_heartbeats_task]
 
+    async def synchronize_blocks(self, latest_block_id,neighbor_address):
+        print(f"synchronize_blocks latest_block_id : {latest_block_id} neighbor_address : {neighbor_address}")
+        current_block_id = -1 if len(self.blocks) == 0 else (len(self.blocks)-1)
+        while current_block_id < latest_block_id :
+            getblock_request = block_chain_pb2.GetBlockRequest(id=current_block_id+1)
+            try:
+                async with grpc.aio.insecure_channel(neighbor_address) as channel:
+                    stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
+                    get_block_response = await stub.GetBlock(getblock_request)
+                    if get_block_response.error_message:
+                        print(f"synchronize_blocks an error_message from {neighbor_address}: heartbeat_response.error_message")
+                        break
+                    grpc_block = get_block_response.block
+                    block = Block(index=grpc_block.id,
+                          hash=grpc_block.hash,
+                          previous_hash=grpc_block.previous_hash,
+                          audits=grpc_block.audits,
+                          merkle_root=grpc_block.merkle_root)
+                    self.blocks.append(block)
+                    current_block_id += 1
+            except Exception as e:
+                print(f"synchronize_blocks an error occurred sending to {neighbor_address}: {e}")
+                break
+    async def monitor_heartbeats(self):
+        while True :
+            for neighbor in self.neighbors:
+                if neighbor in HEARTBEATS_MAP :
+                    last_time, heart_beat_info = HEARTBEATS_MAP[neighbor]
+                    other_latest_block_id = heart_beat_info.latest_block_id
+                    if  not self.leader :
+                        local_last_block_id = -1 if len(self.blocks) == 0 else len(self.blocks)-1
+                        if local_last_block_id <  other_latest_block_id :
+                            await self.synchronize_blocks(other_latest_block_id,neighbor)
+            await asyncio.sleep(2)
+    async def create_monitor_task(self):
+        monitor_task = asyncio.create_task(self.monitor_heartbeats())
+        return monitor_task
 
     def create_block(self, audits, merkle_tree):
         if len(self.blocks) == 0:
-            previous_hash = ""
+            previous_hash = "genesis"
             index = 0
         else:
             last_block = self.blocks[-1]
@@ -88,7 +127,7 @@ class FullNode():
     def verify_previous_block_hash(self, block):
         # Check for the last stored hash and prev hash from the request
         if len(self.blocks) == 0:
-            previous_block_hash = ""
+            previous_block_hash = "genesis"
         else:
             previous_block_hash = self.blocks[-1].hash
 
@@ -309,6 +348,31 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
                         vote=False,
                         status="failure",
                         error_message=f"Failed to verify audit {audit}")
+                    
+        # TODO: check current block hash
+        # create merkle tree
+        merkle_tree = MerkleTree(block.audits)
+
+        if merkle_tree.root != block.merkle_root:
+            error_message = f"Merkle root {block.merkle_root} does not match expected merkle root {merkle_tree.root}"
+            print(error_message)
+            return block_chain_pb2.BlockVoteResponse(
+                        vote=False,
+                        status="failure",
+                        error_message=error_message)
+        else:
+            print(f"Merkle roots match {merkle_tree.root}!!")
+
+        # Create new block in the chain
+        new_block = self.full_node.create_block(block.audits, merkle_tree)
+        
+        if new_block.hash != block.hash:
+            error_message = f"Block hash {block.hash} does not match expected hash {new_block.hash}"
+            print(error_message)
+            return block_chain_pb2.BlockVoteResponse(
+                        vote=False,
+                        status="failure",
+                        error_message=error_message)
 
         return block_chain_pb2.BlockVoteResponse(vote=True, status="success")
 
@@ -360,7 +424,8 @@ async def serve(full_node):
     print("Server started on port ", full_node.port)
 
     heartbeat_tasks = full_node.create_heartbeat_tasks()
-    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks)
+    monitor_task = full_node.create_monitor_task()
+    await asyncio.gather(server.start(), full_node.process_queue(), *heartbeat_tasks, monitor_task)
     await server.wait_for_termination()
 
 
