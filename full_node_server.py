@@ -195,10 +195,7 @@ class FullNode():
 
         votes = 0
         voted_neighbors = 0
-        for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
-            if not heartbeat_data['is_valid']:
-                continue
-
+        for neighbor in self.neighbors:
             try:
                 async with grpc.aio.insecure_channel(neighbor) as channel:
                     stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
@@ -237,10 +234,7 @@ class FullNode():
     async def notify_leadership(self):
         request = block_chain_pb2.NotifyLeadershipRequest(address=self.address)
 
-        for neighbor, heartbeat_data in HEARTBEATS_MAP.items():
-            if not heartbeat_data['is_valid']:
-                continue
-
+        for neighbor in self.neighbors:
             try:
                 async with grpc.aio.insecure_channel(neighbor) as channel:
                     stub = block_chain_pb2_grpc.BlockChainServiceStub(channel)
