@@ -176,3 +176,5 @@ cython_debug/
 .pypirc
 
 audit_hashes.json
+
+blocks

@@ -5,6 +5,8 @@ import asyncio
 import grpc
 import time
 import yaml
+import os
+import json
 
 import block_chain_pb2
 import block_chain_pb2_grpc
@@ -16,7 +18,7 @@ import file_audit_pb2_grpc
 from modules.block import Block
 from modules.merkle import MerkleTree
 from modules.signature import verify_signature
-
+from google.protobuf.json_format import MessageToDict
 from google.protobuf import empty_pb2
 
 
@@ -95,7 +97,7 @@ class FullNode():
                         break
                     await self.commit_block(grpc_block)
                     current_block_id += 1
-            
+
             except Exception as e:
                 print(f"synchronize_blocks an error occurred sending to {neighbor_address}: {e}")
                 break
@@ -280,13 +282,23 @@ class FullNode():
 
 
     def append_block(self, new_block):
-        if new_block.index in self.known_block_hashes :
+        print(f"\nAppending new block: index={new_block.index}, hash={new_block.hash}")
+
+        if new_block.index in self.known_block_hashes:
             print(f"append_block Ignoring duplicate block {new_block}")
             return
-        
+
         self.known_block_hashes.add(new_block.index)
         self.blocks.append(new_block)
-        print(f"Block appended: {new_block.hash}")
+        print(f"Block appended to memory: {new_block.hash}")
+
+        # Save block to disk
+        try:
+            print("Attempting to save block to disk...")
+            self.save_block_to_disk(new_block)
+            print("Block successfully saved to disk")
+        except Exception as e:
+            print(f"Error saving block to disk: {e}")
 
 
     def append_to_mem_pool(self,req):
@@ -297,7 +309,7 @@ class FullNode():
     def remove_from_mem_pool(self, req):
         print(f"Request removed from mem pool: {req.req_id}")
         self.mem_pool.remove(req)
-    
+
     async def validate_block (self, grpc_block):
         # Verify audit signatures
         for audit in grpc_block.audits:
@@ -325,9 +337,9 @@ class FullNode():
             error_message = f"Block hash {grpc_block.hash} does not match expected hash {new_block.hash}"
             print(error_message)
             return (False, error_message)
-        
+
         return (True , None)
-    
+
     async def broadcast_whisper_audits(self, request):
         for neighbor in self.neighbors:
             try:
@@ -452,59 +464,114 @@ class FullNode():
 
     # Save block to disk
     def save_block_to_disk(self, block, path="./blocks"):
-        os.makedirs(path, exist_ok=True)
-        if not block.id:
-            block.id = 0
-        block_dict = MessageToDict(block, preserving_proto_field_name=True)
-        block_number = block.id
+        try:
+            print(f"\nAttempting to save block {block.index} to disk...")
+            print(f"Block details: hash={block.hash}, previous_hash={block.previous_hash}")
 
-        file_path = os.path.join(path, f"block_{block_number}.json")
-        with open(file_path, 'w') as f:
-            json.dump(block_dict, f, indent=4)
-        print(f"Block {block_number} saved to: {file_path}")
+            os.makedirs(path, exist_ok=True)
+            print(f"Created/verified blocks directory at {path}")
+
+            # Convert audits to serializable format
+            serialized_audits = []
+            for audit in block.audits:
+                # Convert Unix timestamp to human readable format
+                audit_time = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(audit.timestamp))
+
+                audit_dict = {
+                    "req_id": audit.req_id,
+                    "file_info": {
+                        "file_id": audit.file_info.file_id,
+                        "file_name": audit.file_info.file_name
+                    },
+                    "user_info": {
+                        "user_id": audit.user_info.user_id,
+                        "user_name": audit.user_info.user_name
+                    },
+                    "access_type": audit.access_type,
+                    "timestamp": audit.timestamp,
+                    "timestamp_readable": audit_time
+                }
+                serialized_audits.append(audit_dict)
+
+            # Convert block timestamp to human readable format
+            block_time = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(block.timestamp))
+
+            # Convert Block object to a dictionary
+            block_dict = {
+                "id": block.index,
+                "hash": block.hash,
+                "previous_hash": block.previous_hash,
+                "merkle_root": block.merkle_root,
+                "timestamp": block.timestamp,
+                "timestamp_readable": block_time,
+                "audits": serialized_audits
+            }
+
+            file_path = os.path.join(path, f"block_{block.index}.json")
+            print(f"Saving to file: {file_path}")
+
+            with open(file_path, 'w') as f:
+                json.dump(block_dict, f, indent=4)
+            print(f"Successfully saved block {block.index} to: {file_path}")
+
+        except Exception as e:
+            print(f"Error in save_block_to_disk: {str(e)}")
+            import traceback
+            print(f"Full error: {traceback.format_exc()}")
+            raise e
 
 
     # Load blocks from disk
     def load_blocks_from_disk(self, path="./blocks"):
         blocks = []
-        if os.path.exists(path):
-            for fname in sorted(os.listdir(path)):
-                if fname.endswith(".json"):
-                    with open(os.path.join(path, fname)) as f:
-                        block_dict = json.load(f)
-                        print(f"[DEBUG] Loading block from {fname}: {block_dict}")
+        try:
+            if os.path.exists(path):
+                for fname in sorted(os.listdir(path)):
+                    if fname.endswith(".json"):
+                        file_path = os.path.join(path, fname)
+                        try:
+                            with open(file_path) as f:
+                                block_dict = json.load(f)
 
-                        if 'index' not in block_dict:
-                            try:
-                                block_num = int(fname.split('_')[1].split('.')[0])
-                                block_dict['index'] = block_num
-                                print(f"Added missing index {block_num} from filename")
-                            except (IndexError, ValueError):
-                                block_dict['index'] = len(blocks)
-                                print(f"Added missing index {len(blocks)} based on block count")
+                                # Convert saved audits back to FileAudit objects
+                                audits = []
+                                for audit_dict in block_dict.get('audits', []):
+                                    audit = common_pb2.FileAudit(
+                                        req_id=audit_dict['req_id'],
+                                        file_info=common_pb2.FileInfo(
+                                            file_id=audit_dict['file_info']['file_id'],
+                                            file_name=audit_dict['file_info']['file_name']
+                                        ),
+                                        user_info=common_pb2.UserInfo(
+                                            user_id=audit_dict['user_info']['user_id'],
+                                            user_name=audit_dict['user_info']['user_name']
+                                        ),
+                                        access_type=audit_dict['access_type'],
+                                        timestamp=audit_dict['timestamp']
+                                    )
+                                    audits.append(audit)
 
-                        if 'previous_hash' not in block_dict:
-                            # Default value for the first block or missing hash
-                            block_dict['previous_hash'] = "0"
-                            print(f"Added default previous_hash: 0")
+                                # Create Block instance
+                                block = Block(
+                                    index=block_dict['id'],
+                                    previous_hash=block_dict['previous_hash'],
+                                    audits=audits,
+                                    merkle_root=block_dict.get('merkle_root'),
+                                    timestamp=block_dict.get('timestamp'),
+                                    hash=block_dict.get('hash')
+                                )
+                                blocks.append(block)
+                                print(f"Loaded block {block.index} from {fname}")
+                        except Exception as e:
+                            print(f"Error loading block from {fname}: {e}")
+                            continue
 
-                        if 'audits' not in block_dict:
-                            # Default to an empty list if audits are missing
-                            block_dict['audits'] = []
-                            print(f"Added default audits: []")
-
-                        # Create a Block instance with the required fields
-                        block = Block(
-                            index=block_dict['index'],
-                            previous_hash=block_dict['previous_hash'],
-                            audits=block_dict['audits'],
-                            merkle_root=block_dict.get('merkle_root'),
-                            timestamp=block_dict.get('timestamp'),
-                            hash=block_dict.get('hash')
-                        )
-                        blocks.append(block)
-        print(f"Loaded {len(blocks)} block(s) from disk.")
-        return blocks
+            blocks.sort(key=lambda x: x.index)  # Ensure blocks are in order
+            print(f"Loaded {len(blocks)} block(s) from disk")
+            return blocks
+        except Exception as e:
+            print(f"Error in load_blocks_from_disk: {e}")
+            return []
 
 
 class FileAuditService(file_audit_pb2_grpc.FileAuditServiceServicer):
@@ -572,13 +639,13 @@ class BlockChainService(block_chain_pb2_grpc.BlockChainServiceServicer):
             self.audit_hash_store = {}
 
         valid, validation_error_msg = await self.full_node.validate_block(block)
-        
+
         if not valid :
                 return block_chain_pb2.BlockVoteResponse(
                          vote=False,
                          status="failure",
                          error_message=validation_error_msg)
-        
+
         if hasattr(self, 'save_audit_hashes'):
             self.save_audit_hashes()
 
@@ -739,6 +806,16 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
 
     full_node = FullNode(args, config)
+
+    # Load existing blocks from disk on startup
+    try:
+        loaded_blocks = full_node.load_blocks_from_disk()
+        full_node.blocks = loaded_blocks
+        for block in loaded_blocks:
+            full_node.known_block_hashes.add(block.index)
+        print(f"Loaded {len(loaded_blocks)} blocks from disk")
+    except Exception as e:
+        print(f"Error loading blocks from disk: {e}")
 
     print(full_node.port)
     print(full_node.is_leader)
